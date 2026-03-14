@@ -1,0 +1,212 @@
+# =============================================================================
+# Stage: validate — Source Quality Validation
+# =============================================================================
+# Fast pre-build checks that don't require compilation. Runs in parallel to
+# catch issues early before the expensive build stage.
+# =============================================================================
+
+# --- Sorry detection in source files ---
+sorry_scan:
+  stage: validate
+  tags:
+    - normal
+  timeout: 10m
+  interruptible: true
+  needs: []
+  script:
+    - |
+      echo "=== Sorry Detection ==="
+      exit_code=0
+
+      echo "--- Scanning library sources (WasmNum/) ---"
+      lib_sorry=$(grep -rn '\bsorry\b' WasmNum/ \
+        --include="*.lean" \
+        --exclude-dir="Proofs" \
+        | grep -v '^\s*--' \
+        | grep -v 'CI:allow-sorry' \
+        || true)
+
+      if [ -n "$lib_sorry" ]; then
+        count=$(echo "$lib_sorry" | wc -l)
+        echo "WARNING: sorry found in $count location(s) in library sources:"
+        echo "$lib_sorry"
+      else
+        echo "Library sources: clean"
+      fi
+
+      echo ""
+      echo "--- Scanning proof files (BLOCKING) ---"
+      proof_sorry=""
+
+      if [ -d "WasmNum/Proofs" ]; then
+        hits=$(grep -rn '\bsorry\b' WasmNum/Proofs/ \
+          --include="*.lean" \
+          | grep -v '^\s*--' \
+          | grep -v 'CI:allow-sorry' \
+          || true)
+        proof_sorry="$hits"
+      fi
+
+      if [ -d "Proofs" ]; then
+        hits=$(grep -rn '\bsorry\b' Proofs/ \
+          --include="*.lean" \
+          | grep -v '^\s*--' \
+          | grep -v 'CI:allow-sorry' \
+          || true)
+        proof_sorry="${proof_sorry}${hits}"
+      fi
+
+      if [ -n "$proof_sorry" ]; then
+        echo "ERROR: sorry found in proof files — PIPELINE BLOCKED"
+        echo "$proof_sorry"
+        exit 1
+      else
+        echo "Proof files: clean"
+      fi
+  rules:
+    - when: always
+
+# --- Source lint checks ---
+lint_sources:
+  stage: validate
+  tags:
+    - normal
+  timeout: 10m
+  interruptible: true
+  needs: []
+  script:
+    - |
+      echo "=== Source Quality Lint ==="
+      exit_code=0
+
+      # Check for dbg_trace (BLOCKING)
+      echo "--- Checking for dbg_trace ---"
+      dbg_hits=$(grep -rn 'dbg_trace' WasmNum/ --include="*.lean" | grep -v 'CI:allow' || true)
+      if [ -n "$dbg_hits" ]; then
+        echo "ERROR: dbg_trace found in library sources:"
+        echo "$dbg_hits"
+        exit_code=1
+      else
+        echo "dbg_trace: clean"
+      fi
+
+      # Check for #eval in library (WARNING)
+      echo "--- Checking for #eval ---"
+      eval_hits=$(grep -rn '#eval' WasmNum/ --include="*.lean" \
+        | grep -v '^\s*--' \
+        | grep -v 'CI:allow' \
+        || true)
+      if [ -n "$eval_hits" ]; then
+        echo "WARNING: #eval found in library sources:"
+        echo "$eval_hits"
+      else
+        echo "#eval: clean"
+      fi
+
+      # Check for panic! (WARNING)
+      echo "--- Checking for panic! ---"
+      panic_hits=$(grep -rn 'panic!' WasmNum/ --include="*.lean" | grep -v 'CI:allow' || true)
+      if [ -n "$panic_hits" ]; then
+        echo "WARNING: panic! found:"
+        echo "$panic_hits"
+      fi
+
+      exit $exit_code
+  rules:
+    - when: always
+
+# --- Project configuration validation ---
+lint_config:
+  stage: validate
+  tags:
+    - normal
+  timeout: 5m
+  interruptible: true
+  needs: []
+  script:
+    - |
+      echo "=== Configuration Validation ==="
+
+      # Validate lean-toolchain
+      echo "--- lean-toolchain ---"
+      toolchain=$(cat lean-toolchain | tr -d '[:space:]')
+      if echo "$toolchain" | grep -qE '^leanprover/lean4:v[0-9]+\.[0-9]+'; then
+        echo "OK: $toolchain"
+      else
+        echo "ERROR: Invalid lean-toolchain format: '$toolchain'"
+        exit 1
+      fi
+
+      # Validate lakefile.toml
+      echo "--- lakefile.toml ---"
+      if grep -q 'name = "wasm-num"' lakefile.toml; then
+        echo "OK: Project name present"
+      else
+        echo "ERROR: Missing project name in lakefile.toml"
+        exit 1
+      fi
+
+      if grep -q 'mathlib' lakefile.toml; then
+        echo "OK: Mathlib dependency present"
+      else
+        echo "ERROR: Missing mathlib dependency"
+        exit 1
+      fi
+
+      # Validate lake-manifest.json
+      echo "--- lake-manifest.json ---"
+      if [ ! -f lake-manifest.json ]; then
+        echo "ERROR: lake-manifest.json missing"
+        exit 1
+      fi
+      python3 -c "import json; json.load(open('lake-manifest.json')); print('OK: Valid JSON')" 2>/dev/null \
+        || echo "WARNING: Cannot validate JSON (python3 not available)"
+
+      # Verify root import files exist
+      echo "--- Root imports ---"
+      for f in WasmNum.lean WasmNumProofs.lean TestAll.lean; do
+        if [ -s "$f" ]; then
+          echo "OK: $f ($(wc -l < "$f") lines)"
+        else
+          echo "ERROR: $f is missing or empty"
+          exit 1
+        fi
+      done
+
+      echo "=== All configuration checks passed ==="
+  rules:
+    - when: always
+
+# --- Import consistency check ---
+lint_imports:
+  stage: validate
+  tags:
+    - normal
+  timeout: 5m
+  interruptible: true
+  needs: []
+  script:
+    - |
+      echo "=== Import Consistency Check ==="
+
+      # Check that every .lean file in WasmNum/ is imported somewhere
+      echo "--- Checking for orphan modules ---"
+      orphans=0
+      while IFS= read -r file; do
+        # Convert file path to module path
+        module=$(echo "$file" | sed 's|/|.|g' | sed 's|\.lean$||')
+        # Check if this module is imported in any root file or sibling
+        if ! grep -rq "import $module" *.lean WasmNum/ --include="*.lean" 2>/dev/null; then
+          echo "WARNING: Possible orphan module: $file (import $module)"
+          orphans=$((orphans + 1))
+        fi
+      done < <(find WasmNum/ -name "*.lean" -not -name "*.olean" | sort)
+
+      if [ "$orphans" -gt 0 ]; then
+        echo "Found $orphans potential orphan module(s)"
+      else
+        echo "All modules appear to be imported"
+      fi
+  rules:
+    - when: always
+  allow_failure: true
