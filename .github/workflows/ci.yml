@@ -15,7 +15,8 @@ run-name: "${{ github.actor }} — ${{ github.event_name }} on ${{ github.ref_na
 
 on:
   push:
-    branches: [main, develop, release/*, hotfix/*]
+    branches:
+      - '**'
     paths-ignore:
       - "docs/**"
       - "*.md"
@@ -24,7 +25,8 @@ on:
       - ".github/dependabot.yml"
       - ".github/CODEOWNERS"
   pull_request:
-    branches: [main, develop, release/*]
+    branches:
+      - '**'
     types: [opened, synchronize, reopened]
   workflow_dispatch:
     inputs:
