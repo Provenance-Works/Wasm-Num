@@ -1,0 +1,118 @@
+# =============================================================================
+# GitLab CI/CD Pipeline — Lean 4 Formal Verification (wasm-num)
+# =============================================================================
+# Enterprise-grade multi-stage pipeline for building, testing, and validating
+# a Lean 4 + Mathlib formal verification library.
+#
+# Runner: Shell executor with tag 'normal'
+# Key dependency: leanprover-community/mathlib4 (via lake exe cache get)
+#
+# Pipeline stages:
+#   prepare  → Toolchain setup, dependency resolution, mathlib cache
+#   validate → Source linting, sorry detection, config validation
+#   build    → Build definitions, proofs, and tests
+#   test     → Execute test suite, post-build verification
+#   analyze  → Axiom audit, proof metrics, build analysis
+#   security → Secret detection, dependency audit, license check
+#   release  → Tag-based release automation
+# =============================================================================
+
+# --- Workflow rules: prevent duplicate pipelines ---
+workflow:
+  name: "$CI_COMMIT_REF_NAME — $CI_PIPELINE_SOURCE"
+  auto_cancel:
+    on_new_commit: interruptible
+    on_job_failure: none
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
+      variables:
+        PIPELINE_TYPE: "release"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      variables:
+        PIPELINE_TYPE: "merge_request"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      variables:
+        PIPELINE_TYPE: "default_branch"
+    - if: $CI_COMMIT_BRANCH =~ /^release\//
+      variables:
+        PIPELINE_TYPE: "release_branch"
+    - if: $CI_PIPELINE_SOURCE == "web"
+      variables:
+        PIPELINE_TYPE: "manual"
+    - if: $CI_COMMIT_BRANCH
+      variables:
+        PIPELINE_TYPE: "feature_branch"
+
+# --- Stage definitions ---
+stages:
+  - prepare
+  - validate
+  - build
+  - test
+  - analyze
+  - security
+  - release
+
+# --- Global variables ---
+variables:
+  GIT_DEPTH: 50
+  GIT_STRATEGY: fetch
+  LAKE_WORKERS: "4"
+  # Lean/elan environment
+  ELAN_HOME: "$HOME/.elan"
+  PATH_OVERRIDE: "$HOME/.elan/bin:$PATH"
+
+# --- Default job configuration ---
+default:
+  tags:
+    - normal
+  timeout: 30m
+  interruptible: true
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - stuck_or_timeout_failure
+  before_script:
+    # Ensure elan is in PATH for all jobs
+    - export PATH="$ELAN_HOME/bin:$PATH"
+
+# --- Cache templates ---
+# Lean toolchain + packages cache (keyed on manifest)
+.cache_packages: &cache_packages
+  cache:
+    - key:
+        files:
+          - lean-toolchain
+          - lake-manifest.json
+      paths:
+        - .lake/packages/
+      policy: pull-push
+    - key: "lake-build-${CI_COMMIT_SHORT_SHA}"
+      paths:
+        - .lake/build/
+      policy: pull-push
+
+.cache_packages_pull: &cache_packages_pull
+  cache:
+    - key:
+        files:
+          - lean-toolchain
+          - lake-manifest.json
+      paths:
+        - .lake/packages/
+      policy: pull
+    - key: "lake-build-${CI_COMMIT_SHORT_SHA}"
+      paths:
+        - .lake/build/
+      policy: pull
+
+# --- Modular pipeline includes ---
+include:
+  - local: ".gitlab/ci/prepare.yml"
+  - local: ".gitlab/ci/validate.yml"
+  - local: ".gitlab/ci/build.yml"
+  - local: ".gitlab/ci/test.yml"
+  - local: ".gitlab/ci/analyze.yml"
+  - local: ".gitlab/ci/security.yml"
+  - local: ".gitlab/ci/release.yml"
