@@ -290,7 +290,7 @@ jobs:
           fi
 
           # GitHub tokens
-          if grep -rn '[g]hp_[a-zA-Z0-9]\{36\}\|gho_[a-zA-Z0-9]\{36\}\|github_pat_' --include="*.lean" --include="*.toml" --include="*.json" . 2>/dev/null; then
+          if grep -rn '[g]hp_[a-zA-Z0-9]\{36\}\|[g]ho_[a-zA-Z0-9]\{36\}\|[g]ithub_pat_' --include="*.lean" --include="*.toml" --include="*.json" . 2>/dev/null; then
             echo "::error::Possible GitHub token detected"
             found=1
           fi

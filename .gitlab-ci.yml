@@ -70,9 +70,15 @@ default:
       - runner_system_failure
       - stuck_or_timeout_failure
   before_script:
-    # Set up elan environment (accounting for both runner user and system-wide root installs)
     - export ELAN_HOME="${HOME}/.elan"
-    - export PATH="${ELAN_HOME}/bin:/root/.elan/bin:$PATH"
+    - export PATH="${ELAN_HOME}/bin:/usr/local/bin:$PATH"
+    # gitlab-runner ユーザーとして elan が見つからない場合は、ユーザープロファイルにインストールします
+    # (rootにインストールされていても権限によりアクセスできないため)
+    - |
+      if ! command -v lake >/dev/null 2>&1; then
+        echo "Installing elan for gitlab-runner user..."
+        curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none --no-modify-path
+      fi
 
 # --- Cache templates ---
 # Lean toolchain + packages cache (keyed on manifest)

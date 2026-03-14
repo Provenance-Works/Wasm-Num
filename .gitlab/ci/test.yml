@@ -1,5 +1,5 @@
 # =============================================================================
-# Stage: test — Test Execution & Post-build Verification
+# Stage: test  ETest Execution & Post-build Verification
 # =============================================================================
 # Runs the test suite and performs post-build verification including sorry
 # detection in build output and build integrity checks.
@@ -43,7 +43,7 @@ verify_no_sorry:
       fi
 
       echo ""
-      echo "All build outputs verified — no sorry detected"
+      echo "All build outputs verified  Eno sorry detected"
   rules:
     - when: on_success
 
@@ -116,7 +116,7 @@ full_rebuild_check:
         - .lake/build/
       policy: pull
   script:
-    - export PATH="$ELAN_HOME/bin:$PATH"
+    # PATH previously exported
     - |
       echo "=== Full Default Targets Build ==="
       echo "Building all default targets to verify consistency..."

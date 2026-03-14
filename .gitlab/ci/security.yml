@@ -41,7 +41,7 @@ secret_detection:
 
       # Platform tokens (GitHub, GitLab)
       echo "--- Platform tokens ---"
-      if grep -rn '[g]hp_\|gho_\|github_pat_\|glpat-\|gcicd_' --include="*.lean" --include="*.toml" --include="*.json" --include="*.yml" --include="*.yaml" . 2>/dev/null; then
+      if grep -rn '[g]hp_\|[g]ho_\|[g]ithub_pat_\|[g]lpat-\|[g]cicd_' --include="*.lean" --include="*.toml" --include="*.json" --include="*.yml" --include="*.yaml" . 2>/dev/null; then
         echo "ALERT: Platform token detected"
         found=1
       else

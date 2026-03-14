@@ -62,7 +62,7 @@ jobs:
           fi
 
           # GitHub / GitLab tokens
-          if git grep -n '[g]hp_\|gho_\|github_pat_\|glpat-' -- '*.lean' '*.toml' '*.json' '*.yml' '*.yaml' 2>/dev/null; then
+          if git grep -n '[g]hp_\|[g]ho_\|[g]ithub_pat_\|[g]lpat-' -- '*.lean' '*.toml' '*.json' '*.yml' '*.yaml' 2>/dev/null; then
             echo "::error::Platform token detected in working tree"
             found=1
           fi
@@ -76,7 +76,7 @@ jobs:
           echo "=== Scanning git history (last 100 commits) ==="
           # Check recent commit diffs for secrets
           git log -100 --diff-filter=A -p -- '*.lean' '*.toml' '*.json' '*.yml' '*.yaml' | \
-            grep -n '[A]KIA\|[B]EGIN.*PRIVATE KEY\|[g]hp_\|gho_\|glpat-\|[p]assword\s*=' || true
+            grep -n '[A]KIA\|[B]EGIN.*PRIVATE KEY\|[g]hp_\|[g]ho_\|[g]lpat-\|[p]assword\s*=' || true
 
           if [ "$found" -eq 1 ]; then
             echo "**FAILED** — Secrets detected" >> "$GITHUB_STEP_SUMMARY"

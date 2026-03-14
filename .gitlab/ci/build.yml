@@ -1,13 +1,13 @@
 # =============================================================================
-# Stage: build — Lean 4 Library Build
+# Stage: build  ELean 4 Library Build
 # =============================================================================
 # Builds all Lean 4 targets: definitions (WasmNum), formal proofs
 # (WasmNumProofs), and tests (TestAll). Uses Lake with Mathlib cache for
 # incremental compilation.
 #
 # Build graph:
-#   build_definitions → build_proofs (depends on definitions)
-#                     → build_tests  (depends on definitions)
+#   build_definitions ↁEbuild_proofs (depends on definitions)
+#                     ↁEbuild_tests  (depends on definitions)
 # =============================================================================
 
 # --- Build WasmNum definitions ---
@@ -34,8 +34,6 @@ build_definitions:
         - .lake/build/
       policy: push
   script:
-    - export PATH="$ELAN_HOME/bin:$PATH"
-
     # Ensure Mathlib cache is available
     - |
       echo "=== Pre-build: Checking Mathlib cache ==="
@@ -95,7 +93,7 @@ build_proofs:
         - .lake/build/
       policy: pull-push
   script:
-    - export PATH="$ELAN_HOME/bin:$PATH"
+    # PATH previously exported
 
     # Fetch Mathlib cache if needed
     - lake exe cache get 2>/dev/null || true
@@ -117,7 +115,7 @@ build_proofs:
       echo "=== Post-build sorry verification ==="
       sorry_warnings=$(grep -i 'sorry' build-proofs.log || true)
       if [ -n "$sorry_warnings" ]; then
-        echo "FATAL: Proof build output references sorry — proofs are incomplete"
+        echo "FATAL: Proof build output references sorry  Eproofs are incomplete"
         echo "$sorry_warnings"
         exit 1
       fi
@@ -165,7 +163,7 @@ build_tests:
         - .lake/build/
       policy: pull-push
   script:
-    - export PATH="$ELAN_HOME/bin:$PATH"
+    # PATH previously exported
 
     # Fetch Mathlib cache if needed
     - lake exe cache get 2>/dev/null || true
