@@ -126,10 +126,10 @@ docs/                  # Design docs, ADRs, requirements, research
 
 ### Key Conventions
 
-- **Definitions and proofs are separated** ([ADR-006](docs/adr/006-proof-separation.md)). Definitions go in `WasmNum/`, proofs go in `WasmNum/Proofs/`.
+- **Definitions and proofs are separated** ([ADR-006](docs/design/adr/0006-proof-separation.md)). Definitions go in `WasmNum/`, proofs go in `WasmNum/Proofs/`.
 - **`@[simp]` lemmas** may live alongside definitions. All other theorems go in `Proofs/`.
 - **Non-deterministic operations** return `Set α`. Deterministic variants live in `Integration/`.
-- **No C FFI** ([ADR-007](docs/adr/007-no-c-ffi.md)) — everything is pure Lean.
+- **No C FFI** ([ADR-007](docs/design/adr/0007-no-c-ffi.md)) — everything is pure Lean.
 - **No `sorry` in merged code** — definitions and proofs must be complete.
 - **`autoImplicit = false`** — all implicit arguments must be declared explicitly.
 
