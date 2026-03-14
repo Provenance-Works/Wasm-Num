@@ -160,26 +160,28 @@ WasmNum/
     └── SIMD/                     # SIMD 証明（Ops, Relaxed, V128）
 ```
 
-## Proofs/ — 独立証明
+## Proofs/ — 独立証明プレースホルダー
+
+リポジトリルートの `Proofs/` ディレクトリは、将来の独立証明用の空のプレースホルダーディレクトリ（`.gitkeep` のみ）です。現在の証明はすべて `WasmNum/Proofs/` にあります。
 
 ```
 Proofs/
-├── Foundation/                   # Foundation レベルの証明
-├── Integration/                  # Integration の証明
+├── Foundation/                   # （プレースホルダー — .gitkeep のみ）
+├── Integration/                  # （プレースホルダー — .gitkeep のみ）
 ├── Memory/
-│   ├── Core/                     # コアメモリ証明
-│   ├── Load/                     # ロード操作の証明
-│   ├── Ops/                      # メモリ操作の証明
-│   └── Store/                    # ストア操作の証明
+│   ├── Core/                     # （プレースホルダー — .gitkeep のみ）
+│   ├── Load/                     # （プレースホルダー — .gitkeep のみ）
+│   ├── Ops/                      # （プレースホルダー — .gitkeep のみ）
+│   └── Store/                    # （プレースホルダー — .gitkeep のみ）
 ├── Numerics/
-│   ├── Conversion/               # 変換の証明
-│   ├── Float/                    # 浮動小数点操作の証明
-│   ├── Integer/                  # 整数操作の証明
-│   └── NaN/                      # NaN 伝播の証明
+│   ├── Conversion/               # （プレースホルダー — .gitkeep のみ）
+│   ├── Float/                    # （プレースホルダー — .gitkeep のみ）
+│   ├── Integer/                  # （プレースホルダー — .gitkeep のみ）
+│   └── NaN/                      # （プレースホルダー — .gitkeep のみ）
 └── SIMD/
-    ├── Ops/                      # SIMD 操作の証明
-    ├── Relaxed/                  # Relaxed SIMD の証明
-    └── V128/                     # V128 コアの証明
+    ├── Ops/                      # （プレースホルダー — .gitkeep のみ）
+    ├── Relaxed/                  # （プレースホルダー — .gitkeep のみ）
+    └── V128/                     # （プレースホルダー — .gitkeep のみ）
 ```
 
 ## WasmTest/ — テストスイート

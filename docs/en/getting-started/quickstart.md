@@ -16,7 +16,7 @@ lake build
 ## 2. Verify
 
 ```bash
-# Run the test suite (414 tests across 12 modules)
+# Run the test suite (414 tests across 11 modules)
 lake build TestAll
 ```
 
