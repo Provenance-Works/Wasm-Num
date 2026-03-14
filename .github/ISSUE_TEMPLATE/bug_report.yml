@@ -1,0 +1,93 @@
+name: "\U0001F41B Bug Report"
+description: Report a bug, spec mismatch, or incorrect definition/proof.
+title: "[Bug]: "
+labels: ["bug", "triage"]
+assignees: ["Aqua-218"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug! Please fill in the details below so we can investigate.
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      description: What kind of issue is this?
+      options:
+        - Incorrect definition (does not match Wasm spec)
+        - Unsound proof (proves something false or uses unintended axioms)
+        - Build failure
+        - Test failure
+        - Documentation error
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of the bug.
+      placeholder: "The definition of `fmin` in WasmNum/Numerics/Float/MinMax.lean does not match the Wasm spec Section 4.3.3..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: spec-reference
+    attributes:
+      label: Wasm Spec Reference
+      description: Link to or quote the relevant section of the WebAssembly specification.
+      placeholder: "Wasm spec Section 4.3.3: https://webassembly.github.io/spec/core/exec/numerics.html#op-fmin"
+    validations:
+      required: false
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce this? Include Lean code if applicable.
+      placeholder: |
+        1. Open `WasmNum/Numerics/Float/MinMax.lean`
+        2. Evaluate `#eval fmin ...`
+        3. Expected: ... Actual: ...
+      render: lean
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What should happen according to the Wasm spec?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happens?
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: |
+        Please provide your environment details.
+      value: |
+        - **Lean version**: (from `lean-toolchain`)
+        - **OS**:
+        - **Mathlib commit**: (from `lake-manifest.json`)
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other information (screenshots, related issues, suggested fix, etc.)
+    validations:
+      required: false
