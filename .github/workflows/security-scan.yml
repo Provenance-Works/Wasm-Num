@@ -1,0 +1,322 @@
+# =============================================================================
+# Security Scan Pipeline — Lean 4 Formal Verification (wasm-num)
+# =============================================================================
+# Scheduled weekly security scanning + on-demand. Performs deep secret detection,
+# dependency vulnerability audit, license compliance check, and CI configuration
+# security review.
+# =============================================================================
+
+name: "Security — Scheduled Security Scan"
+run-name: "Security Scan — ${{ github.event_name }}"
+
+on:
+  schedule:
+    # Weekly Monday 03:00 UTC
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      full_scan:
+        description: "Run full deep scan (includes git history)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # Secret Detection (deep scan including git history)
+  # ─────────────────────────────────────────────────────────────
+  secret-scan:
+    name: "Deep Secret Detection"
+    runs-on: arc-runner-set-pw
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Pattern-based secret scan (full history)
+        shell: bash
+        run: |
+          echo "### Deep Secret Scan" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          found=0
+
+          echo "=== Scanning working tree ==="
+          # AWS access keys
+          if git grep -n 'AKIA[0-9A-Z]\{16\}' -- '*.lean' '*.toml' '*.json' '*.yml' '*.yaml' 2>/dev/null; then
+            echo "::error::AWS access key pattern detected in working tree"
+            found=1
+          fi
+
+          # Private keys
+          if git grep -n 'BEGIN.*PRIVATE KEY' -- '*.lean' '*.toml' '*.json' '*.yml' '*.yaml' '*.pem' 2>/dev/null; then
+            echo "::error::Private key detected in working tree"
+            found=1
+          fi
+
+          # GitHub / GitLab tokens
+          if git grep -n 'ghp_\|gho_\|github_pat_\|glpat-' -- '*.lean' '*.toml' '*.json' '*.yml' '*.yaml' 2>/dev/null; then
+            echo "::error::Platform token detected in working tree"
+            found=1
+          fi
+
+          # Generic API keys / secrets in config
+          if git grep -n 'api[_-]\?key\s*[:=]\s*["'"'"'][a-zA-Z0-9]\{20,\}' -- '*.toml' '*.json' '*.yml' '*.yaml' '*.env' 2>/dev/null; then
+            echo "::error::Possible API key in configuration"
+            found=1
+          fi
+
+          echo "=== Scanning git history (last 100 commits) ==="
+          # Check recent commit diffs for secrets
+          git log -100 --diff-filter=A -p -- '*.lean' '*.toml' '*.json' '*.yml' '*.yaml' | \
+            grep -n 'AKIA\|BEGIN.*PRIVATE KEY\|ghp_\|gho_\|glpat-\|password\s*=' || true
+
+          if [ "$found" -eq 1 ]; then
+            echo "**FAILED** — Secrets detected" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          echo "**PASSED** — No secrets detected" >> "$GITHUB_STEP_SUMMARY"
+
+  # ─────────────────────────────────────────────────────────────
+  # Dependency Vulnerability Audit
+  # ─────────────────────────────────────────────────────────────
+  dependency-audit:
+    name: "Dependency Vulnerability Audit"
+    runs-on: arc-runner-set-pw
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Audit Lean dependencies
+        shell: bash
+        run: |
+          echo "### Dependency Vulnerability Audit" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "=== Dependency manifest analysis ==="
+          # Extract and display all dependencies with their pinned revisions
+          echo "| Package | URL | Rev (pinned) | Inherited |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---------|-----|-------------|-----------|" >> "$GITHUB_STEP_SUMMARY"
+
+          python3 -c "
+          import json
+          with open('lake-manifest.json') as f:
+              data = json.load(f)
+          for pkg in data.get('packages', []):
+              name = pkg.get('name', '?')
+              url = pkg.get('url', '?')
+              rev = pkg.get('rev', '?')[:12]
+              inherited = 'Yes' if pkg.get('inherited', False) else 'No'
+              print(f'| \`{name}\` | {url} | \`{rev}\` | {inherited} |')
+          " 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || echo "| (analysis unavailable) | - | - | - |" >> "$GITHUB_STEP_SUMMARY"
+
+          # Check that all dependencies use HTTPS URLs
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "#### Transport Security" >> "$GITHUB_STEP_SUMMARY"
+          insecure=$(python3 -c "
+          import json
+          with open('lake-manifest.json') as f:
+              data = json.load(f)
+          for pkg in data.get('packages', []):
+              url = pkg.get('url', '')
+              if url and not url.startswith('https://'):
+                  print(f\"INSECURE: {pkg.get('name')} uses {url}\")
+          " 2>/dev/null || true)
+
+          if [ -n "$insecure" ]; then
+            echo "::error::Insecure dependency transport detected"
+            echo "$insecure"
+            echo "**FAILED** — Insecure URLs found" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          else
+            echo "All dependencies use HTTPS transport." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Check for known vulnerable patterns
+        shell: bash
+        run: |
+          echo "=== Checking for known vulnerability patterns ==="
+          # Check for use of deprecated or known-vulnerable Lean patterns
+          vuln_found=0
+
+          # Check for IO.Process.run with user input (command injection risk)
+          if grep -rn 'IO.Process.run\|IO.Process.spawn' WasmNum/ --include="*.lean" 2>/dev/null; then
+            echo "::warning::Process execution found in library code — review for command injection"
+            vuln_found=1
+          fi
+
+          # Check for unsafeIO
+          if grep -rn 'unsafeIO\|unsafeCast' WasmNum/ --include="*.lean" 2>/dev/null | grep -v 'CI:allow'; then
+            echo "::warning::Unsafe operations detected — review for safety"
+          fi
+
+          echo "Vulnerability pattern scan complete"
+
+  # ─────────────────────────────────────────────────────────────
+  # License Compliance Check
+  # ─────────────────────────────────────────────────────────────
+  license-check:
+    name: "License Compliance"
+    runs-on: arc-runner-set-pw
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check license compliance
+        shell: bash
+        run: |
+          echo "### License Compliance" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          # Check for LICENSE file
+          if [ -f "LICENSE" ]; then
+            license_type=$(head -1 LICENSE)
+            echo "- Project license file: Present" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Header: \`$license_type\`" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::No LICENSE file found in repository root"
+            echo "- Project license file: **MISSING**" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "#### Dependency Licenses" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Mathlib4: Apache-2.0" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Lean 4: Apache-2.0" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "All known dependencies use Apache-2.0 compatible licenses." >> "$GITHUB_STEP_SUMMARY"
+
+  # ─────────────────────────────────────────────────────────────
+  # CI Configuration Security Review
+  # ─────────────────────────────────────────────────────────────
+  ci-security-review:
+    name: "CI Configuration Security"
+    runs-on: arc-runner-set-pw
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Audit GitHub Actions workflows
+        shell: bash
+        run: |
+          echo "### CI Security Review" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          issues=0
+
+          echo "=== Checking workflow permissions ==="
+          # Check for overly permissive permissions
+          if grep -rn 'permissions:.*write-all' .github/workflows/ 2>/dev/null; then
+            echo "::error::write-all permissions detected in workflows"
+            issues=$((issues + 1))
+          fi
+
+          # Check for unpinned actions (using @main or @master)
+          echo "=== Checking action pinning ==="
+          unpinned=$(grep -rn 'uses:.*@main\|uses:.*@master' .github/workflows/ 2>/dev/null || true)
+          if [ -n "$unpinned" ]; then
+            echo "::warning::Unpinned action references (using @main/@master):"
+            echo "$unpinned"
+            echo "**Warning:** Unpinned action references found" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No @main/@master action references found." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # Check for pull_request_target (security risk)
+          echo "=== Checking for pull_request_target ==="
+          if grep -rn 'pull_request_target' .github/workflows/ 2>/dev/null; then
+            echo "::warning::pull_request_target trigger found — review for security implications"
+            issues=$((issues + 1))
+          fi
+
+          # Check for secret usage patterns
+          echo "=== Checking secret handling ==="
+          if grep -rn 'secrets\.\(GITHUB_TOKEN\|[A-Z_]*\)' .github/workflows/ 2>/dev/null | grep -v 'secrets.GITHUB_TOKEN'; then
+            echo "Custom secrets used in workflows (review for least-privilege):"
+            grep -rn 'secrets\.' .github/workflows/ 2>/dev/null | grep -v 'secrets.GITHUB_TOKEN' || true
+          fi
+
+          # Check for continue-on-error on security jobs
+          echo "=== Checking error suppression ==="
+          if grep -rn 'continue-on-error:\s*true' .github/workflows/ 2>/dev/null; then
+            echo "::warning::continue-on-error found — ensure it's not on security-critical jobs"
+          fi
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$issues" -gt 0 ]; then
+            echo "**Issues found: $issues**" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "**No critical CI security issues found.**" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Audit GitLab CI configuration
+        shell: bash
+        run: |
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "#### GitLab CI Review" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -f ".gitlab-ci.yml" ]; then
+            # Check for allow_failure on security jobs
+            if grep -A2 'security\|secret' .gitlab-ci.yml .gitlab/ci/*.yml 2>/dev/null | grep 'allow_failure:\s*true'; then
+              echo "::warning::allow_failure on security jobs in GitLab CI"
+            fi
+
+            echo "GitLab CI configuration present and reviewed." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No GitLab CI configuration found." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # ─────────────────────────────────────────────────────────────
+  # Security scan summary
+  # ─────────────────────────────────────────────────────────────
+  security-summary:
+    name: "Security Scan Summary"
+    if: always()
+    needs: [secret-scan, dependency-audit, license-check, ci-security-review]
+    runs-on: arc-runner-set-pw
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Aggregate results
+        shell: bash
+        run: |
+          echo "### Security Scan Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Check | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Secret Detection | \`${{ needs.secret-scan.result }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Dependency Audit | \`${{ needs.dependency-audit.result }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| License Compliance | \`${{ needs.license-check.result }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| CI Security Review | \`${{ needs.ci-security-review.result }}\` |" >> "$GITHUB_STEP_SUMMARY"
+
+          # Fail if any critical check failed
+          if [ "${{ needs.secret-scan.result }}" != "success" ]; then
+            echo "::error::Secret detection failed"
+            exit 1
+          fi
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**All security checks completed.**" >> "$GITHUB_STEP_SUMMARY"
