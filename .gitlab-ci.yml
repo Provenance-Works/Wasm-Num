@@ -57,9 +57,6 @@ variables:
   GIT_DEPTH: 50
   GIT_STRATEGY: fetch
   LAKE_WORKERS: "0"
-  # Lean/elan environment
-  ELAN_HOME: "$HOME/.elan"
-  PATH_OVERRIDE: "$HOME/.elan/bin:$PATH"
 
 # --- Default job configuration ---
 default:
@@ -73,13 +70,9 @@ default:
       - runner_system_failure
       - stuck_or_timeout_failure
   before_script:
-    # Ensure elan is installed and in PATH for all jobs
-    - |
-      if [ ! -x "$ELAN_HOME/bin/lake" ]; then
-        echo "Installing elan..."
-        curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none --no-modify-path
-      fi
-    - export PATH="$ELAN_HOME/bin:$PATH"
+    # Set up elan environment (accounting for both runner user and system-wide root installs)
+    - export ELAN_HOME="${HOME}/.elan"
+    - export PATH="${ELAN_HOME}/bin:/root/.elan/bin:$PATH"
 
 # --- Cache templates ---
 # Lean toolchain + packages cache (keyed on manifest)
