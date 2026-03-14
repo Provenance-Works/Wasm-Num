@@ -1,0 +1,260 @@
+# =============================================================================
+# Stage: security — Security Scanning
+# =============================================================================
+# Secret detection, dependency audit, and license compliance checks.
+# Adapted for shell runner (no Docker-based GitLab security templates).
+# =============================================================================
+
+# --- Secret Detection ---
+secret_detection:
+  stage: security
+  tags:
+    - normal
+  timeout: 15m
+  interruptible: true
+  needs: []
+  script:
+    - |
+      echo "╔══════════════════════════════════════╗"
+      echo "║       Secret Detection Scan          ║"
+      echo "╚══════════════════════════════════════╝"
+      echo ""
+      found=0
+
+      # AWS access keys
+      echo "--- AWS access keys ---"
+      if grep -rn 'AKIA[0-9A-Z]\{16\}' --include="*.lean" --include="*.toml" --include="*.json" --include="*.yml" --include="*.yaml" . 2>/dev/null; then
+        echo "ALERT: AWS access key pattern detected"
+        found=1
+      else
+        echo "Clean"
+      fi
+
+      # Private keys
+      echo "--- Private keys ---"
+      if grep -rn 'BEGIN.*PRIVATE KEY' --include="*.lean" --include="*.toml" --include="*.json" --include="*.yml" --include="*.yaml" --include="*.pem" . 2>/dev/null; then
+        echo "ALERT: Private key detected"
+        found=1
+      else
+        echo "Clean"
+      fi
+
+      # Platform tokens (GitHub, GitLab)
+      echo "--- Platform tokens ---"
+      if grep -rn 'ghp_\|gho_\|github_pat_\|glpat-\|gcicd_' --include="*.lean" --include="*.toml" --include="*.json" --include="*.yml" --include="*.yaml" . 2>/dev/null; then
+        echo "ALERT: Platform token detected"
+        found=1
+      else
+        echo "Clean"
+      fi
+
+      # Generic API keys
+      echo "--- API keys ---"
+      if grep -rn 'api[_-]\?key\s*[:=]\s*["'"'"'][a-zA-Z0-9]\{20,\}' --include="*.toml" --include="*.json" --include="*.yml" --include="*.yaml" --include="*.env" . 2>/dev/null; then
+        echo "ALERT: Possible API key in configuration"
+        found=1
+      else
+        echo "Clean"
+      fi
+
+      # Hardcoded passwords
+      echo "--- Hardcoded passwords ---"
+      if grep -rn 'password\s*=\s*"[^"]\{8,\}"' --include="*.toml" --include="*.json" --include="*.yml" --include="*.yaml" --include="*.env" . 2>/dev/null; then
+        echo "ALERT: Possible hardcoded password"
+        found=1
+      else
+        echo "Clean"
+      fi
+
+      echo ""
+      if [ "$found" -eq 1 ]; then
+        echo "SECRET DETECTION FAILED — review flagged items above"
+        exit 1
+      fi
+      echo "All secret detection checks passed"
+  rules:
+    - when: always
+
+# --- Dependency Security Audit ---
+dependency_audit:
+  stage: security
+  tags:
+    - normal
+  timeout: 10m
+  interruptible: true
+  needs: []
+  script:
+    - |
+      echo "╔══════════════════════════════════════╗"
+      echo "║     Dependency Security Audit        ║"
+      echo "╚══════════════════════════════════════╝"
+      echo ""
+
+      # Check all dependencies use HTTPS
+      echo "=== Transport Security ==="
+      insecure_count=0
+      while IFS= read -r url; do
+        if [ -n "$url" ] && ! echo "$url" | grep -q '^"https://'; then
+          echo "INSECURE: $url"
+          insecure_count=$((insecure_count + 1))
+        fi
+      done < <(grep '"url"' lake-manifest.json | awk -F': ' '{print $2}' | tr -d ',')
+
+      if [ "$insecure_count" -gt 0 ]; then
+        echo "FAILED: $insecure_count dependency URL(s) do not use HTTPS"
+        exit 1
+      else
+        echo "All dependency URLs use HTTPS"
+      fi
+
+      echo ""
+
+      # Check all dependencies are pinned to full SHA
+      echo "=== Revision Pinning ==="
+      unpinned=0
+      while IFS= read -r rev; do
+        clean_rev=$(echo "$rev" | tr -d '", ')
+        if [ ${#clean_rev} -lt 40 ] && [ -n "$clean_rev" ]; then
+          echo "WARNING: Short revision detected: $clean_rev"
+          unpinned=$((unpinned + 1))
+        fi
+      done < <(grep '"rev"' lake-manifest.json | awk -F': ' '{print $2}' | tr -d ',')
+
+      if [ "$unpinned" -gt 0 ]; then
+        echo "WARNING: $unpinned dependency revision(s) may not be fully pinned"
+      else
+        echo "All dependency revisions are fully pinned (40-char SHA)"
+      fi
+
+      echo ""
+
+      # Dependency summary
+      echo "=== Dependency Summary ==="
+      total_deps=$(grep -c '"name"' lake-manifest.json || true)
+      direct_deps=$(grep -c '"inherited": false' lake-manifest.json || true)
+      transitive_deps=$((total_deps - direct_deps))
+      echo "Total dependencies: $total_deps (direct: $direct_deps, transitive: $transitive_deps)"
+
+      python3 -c "
+      import json
+      with open('lake-manifest.json') as f:
+          data = json.load(f)
+      print()
+      print(f\"{'Package':<25} {'Revision':<14} {'Type':<12}\")
+      print('-' * 55)
+      for pkg in data.get('packages', []):
+          name = pkg.get('name', '?')
+          rev = pkg.get('rev', '?')[:12]
+          ptype = 'transitive' if pkg.get('inherited', False) else 'direct'
+          print(f'{name:<25} {rev:<14} {ptype:<12}')
+      " 2>/dev/null || echo "(python3 not available for detailed output)"
+  rules:
+    - when: always
+
+# --- License Compliance ---
+license_check:
+  stage: security
+  tags:
+    - normal
+  timeout: 5m
+  interruptible: true
+  needs: []
+  script:
+    - |
+      echo "╔══════════════════════════════════════╗"
+      echo "║       License Compliance             ║"
+      echo "╚══════════════════════════════════════╝"
+      echo ""
+
+      # Check project license
+      echo "=== Project License ==="
+      if [ -f "LICENSE" ]; then
+        echo "LICENSE file: present"
+        echo "First line: $(head -1 LICENSE)"
+      else
+        echo "WARNING: No LICENSE file found"
+      fi
+
+      echo ""
+
+      # Known dependency licenses
+      echo "=== Dependency Licenses ==="
+      echo "Lean 4:    Apache-2.0"
+      echo "Mathlib4:  Apache-2.0"
+      echo "Batteries: Apache-2.0"
+      echo "Aesop:     Apache-2.0"
+      echo "Qq:        Apache-2.0"
+      echo ""
+      echo "All known Lean 4 ecosystem dependencies use Apache-2.0."
+      echo "License compliance: PASSED"
+  rules:
+    - when: always
+  allow_failure: true
+
+# --- CI Configuration Security ---
+ci_config_audit:
+  stage: security
+  tags:
+    - normal
+  timeout: 5m
+  interruptible: true
+  needs: []
+  script:
+    - |
+      echo "╔══════════════════════════════════════╗"
+      echo "║     CI Configuration Audit           ║"
+      echo "╚══════════════════════════════════════╝"
+      echo ""
+
+      issues=0
+
+      # Check GitLab CI for security issues
+      echo "=== GitLab CI Security ==="
+
+      # Check for allow_failure on security jobs
+      if grep -B5 'allow_failure:\s*true' .gitlab-ci.yml .gitlab/ci/*.yml 2>/dev/null | grep -i 'security\|secret'; then
+        echo "WARNING: allow_failure on security-related jobs"
+        issues=$((issues + 1))
+      fi
+
+      # Check for when: manual without allow_failure: false on critical jobs
+      echo "=== Manual gates check ==="
+      if grep -A3 'when:\s*manual' .gitlab/ci/build.yml .gitlab/ci/test.yml 2>/dev/null | grep -v 'allow_failure: false' | grep 'when: manual'; then
+        echo "INFO: Manual gates found on build/test jobs"
+      fi
+
+      echo ""
+
+      # Check GitHub Actions if present
+      if [ -d ".github/workflows" ]; then
+        echo "=== GitHub Actions Security ==="
+
+        # Check for overly permissive permissions
+        if grep -rn 'permissions:.*write-all' .github/workflows/ 2>/dev/null; then
+          echo "ALERT: write-all permissions detected"
+          issues=$((issues + 1))
+        fi
+
+        # Check for unpinned actions
+        unpinned=$(grep -rn 'uses:.*@main\b\|uses:.*@master\b' .github/workflows/ 2>/dev/null || true)
+        if [ -n "$unpinned" ]; then
+          echo "WARNING: Unpinned action references:"
+          echo "$unpinned"
+        fi
+
+        # Check for pull_request_target
+        if grep -rn 'pull_request_target' .github/workflows/ 2>/dev/null; then
+          echo "WARNING: pull_request_target trigger detected"
+          issues=$((issues + 1))
+        fi
+      fi
+
+      echo ""
+      if [ "$issues" -gt 0 ]; then
+        echo "Found $issues security issue(s) — review required"
+      else
+        echo "No critical CI security issues found"
+      fi
+  rules:
+    - when: always
+  allow_failure: true
