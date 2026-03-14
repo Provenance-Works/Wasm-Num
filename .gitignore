@@ -1,1 +1,42 @@
-/.lake
+# =============================================================================
+# .gitignore — wasm-num (Lean 4 + Mathlib)
+# =============================================================================
+
+# Lake build artifacts and dependency cache
+/.lake/
+.lake/
+
+# Lean build outputs
+/build/
+*.olean
+*.ilean
+*.trace
+
+# Lean server/LSP
+*.lsp.json
+
+# Editor / IDE
+.vscode/settings.json
+.vscode/launch.json
+.vscode/*.code-workspace
+.idea/
+*.swp
+*.swo
+*~
+\#*\#
+.#*
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Environment files (should never be committed)
+.env
+.env.*
+!.env.example
+
+# Temporary files
+*.tmp
+*.bak
+*.orig
