@@ -1,0 +1,145 @@
+import WasmNum.Memory.Ops.Fill
+
+/-!
+# Memory Fill Proofs
+
+Formal proofs about memory fill operation.
+
+Wasm spec: Section 4.4.7 "Memory Instructions"
+- FR-515: Memory fill correctness proofs
+-/
+
+set_option autoImplicit false
+set_option maxRecDepth 2048
+
+namespace WasmNum.Memory.Proofs
+
+open WasmNum
+open WasmNum.Memory
+open WasmNum.Memory.Ops
+
+/-- Fill traps when the region exceeds memory bounds. -/
+theorem fill_none_of_oob {addrWidth : Nat} (mem : FlatMemory addrWidth)
+    (dst : BitVec addrWidth) (val : BitVec 8) (len : BitVec addrWidth)
+    (h : dst.toNat + len.toNat > mem.data.size) :
+    fill mem dst val len = none := by
+  unfold fill
+  simp only
+  split
+  · omega
+  · rfl
+
+-- Helper: fillBytesAux preserves data size
+private theorem fillBytesAux_dataSize {addrWidth : Nat}
+    (mem : FlatMemory addrWidth) (offset : Nat) (val : UInt8)
+    : (remaining : Nat) → (result : FlatMemory addrWidth) →
+    fillBytesAux mem offset val remaining = some result →
+    result.data.size = mem.data.size
+  | 0, result, h => by simp [fillBytesAux] at h; subst h; rfl
+  | remaining + 1, result, h => by
+    simp only [fillBytesAux] at h
+    split at h
+    next hlt =>
+      have hsz : ({ mem with
+        data := mem.data.set offset val hlt
+        inv_dataSize := by
+          rw [fillBytesAux.byteArray_size_set]; exact mem.inv_dataSize } :
+        FlatMemory addrWidth).data.size = mem.data.size := by
+        simp [fillBytesAux.byteArray_size_set]
+      have := fillBytesAux_dataSize _ (offset + 1) val remaining result h
+      omega
+    next => simp at h
+
+-- Helper: fillBytesAux succeeds when there's enough room
+private theorem fillBytesAux_some {addrWidth : Nat}
+    (mem : FlatMemory addrWidth) (offset : Nat) (val : UInt8) :
+    (remaining : Nat) → offset + remaining ≤ mem.data.size →
+    ∃ result, fillBytesAux mem offset val remaining = some result
+  | 0, _ => ⟨mem, rfl⟩
+  | remaining + 1, hbound => by
+    simp only [fillBytesAux]
+    have hlt : offset < mem.data.size := by omega
+    simp only [hlt, dite_true]
+    exact fillBytesAux_some _ (offset + 1) val remaining (by
+      simp [fillBytesAux.byteArray_size_set]; omega)
+
+-- Helper: reading a byte outside the fill range is unchanged
+private theorem readByte_fillBytesAux_outside {addrWidth : Nat}
+    (mem : FlatMemory addrWidth) (offset : Nat) (val : UInt8) (j : Nat) :
+    (remaining : Nat) → (result : FlatMemory addrWidth) →
+    (j < offset ∨ offset + remaining ≤ j) →
+    offset + remaining ≤ mem.data.size →
+    fillBytesAux mem offset val remaining = some result →
+    result.readByte j = mem.readByte j
+  | 0, result, _, _, h => by simp [fillBytesAux] at h; subst h; rfl
+  | remaining + 1, result, hout, hbound, h => by
+    simp only [fillBytesAux] at h
+    have hlt : offset < mem.data.size := by omega
+    simp only [hlt, dite_true] at h
+    let mem' : FlatMemory addrWidth := { mem with
+      data := mem.data.set offset val hlt
+      inv_dataSize := by rw [fillBytesAux.byteArray_size_set]; exact mem.inv_dataSize }
+    have hsize' : mem'.data.size = mem.data.size := by
+      simp [fillBytesAux.byteArray_size_set]
+    rw [readByte_fillBytesAux_outside mem' (offset + 1) val j
+      remaining result (by omega) (by omega) h]
+    -- Show mem'.readByte j = mem.readByte j
+    simp only [FlatMemory.readByte, mem']
+    have hne : Not (offset = j) := by omega
+    by_cases hjlt : j < mem.data.size
+    · simp [fillBytesAux.byteArray_size_set, hjlt, dite_true]
+      unfold ByteArray.get ByteArray.set ByteArray.size
+      simp [Array.getElem_set, Array.size_set, hne]
+    · simp [fillBytesAux.byteArray_size_set, hjlt, dite_false]
+
+-- Helper: reading a byte at an offset written by fillBytesAux yields the fill value
+private theorem readByte_fillBytesAux_inside {addrWidth : Nat}
+    (mem : FlatMemory addrWidth) (offset : Nat) (val : UInt8) (k : Nat) :
+    (remaining : Nat) → (result : FlatMemory addrWidth) →
+    k < remaining →
+    offset + remaining ≤ mem.data.size →
+    fillBytesAux mem offset val remaining = some result →
+    result.readByte (offset + k) = some (BitVec.ofNat 8 val.toNat)
+  | 0, _, hk, _, _ => absurd hk (by omega)
+  | remaining + 1, result, hk, hbound, h => by
+    simp only [fillBytesAux] at h
+    have hlt : offset < mem.data.size := by omega
+    simp only [hlt, dite_true] at h
+    let mem' : FlatMemory addrWidth := { mem with
+      data := mem.data.set offset val hlt
+      inv_dataSize := by rw [fillBytesAux.byteArray_size_set]; exact mem.inv_dataSize }
+    have hsize' : mem'.data.size = mem.data.size := by
+      simp [fillBytesAux.byteArray_size_set]
+    match k with
+    | 0 =>
+      rw [show offset + 0 = offset from by omega]
+      have hout := readByte_fillBytesAux_outside mem' (offset + 1) val offset
+        remaining result (by omega) (by omega) h
+      rw [hout]
+      simp only [FlatMemory.readByte, mem']
+      simp [fillBytesAux.byteArray_size_set, hlt, dite_true]
+      unfold ByteArray.get ByteArray.set ByteArray.size
+      simp [Array.getElem_set, Array.size_set]
+    | k' + 1 =>
+      rw [show offset + (k' + 1) = (offset + 1) + k' from by omega]
+      exact readByte_fillBytesAux_inside mem' (offset + 1) val k'
+        remaining result (by omega) (by omega) h
+
+/-- **Fill correctness**: after fill, every byte in the range has the fill value.
+    Wasm spec: FR-515 -/
+theorem fill_correct {addrWidth : Nat}
+    (mem : FlatMemory addrWidth) (dst : BitVec addrWidth)
+    (val : BitVec 8) (len : BitVec addrWidth) (mem' : FlatMemory addrWidth)
+    (hfill : fill mem dst val len = some mem')
+    (k : Nat) (hk : k < len.toNat) :
+    mem'.readByte (dst.toNat + k) = some val := by
+  unfold fill at hfill
+  split at hfill
+  next hbound =>
+    have := readByte_fillBytesAux_inside mem dst.toNat val.toNat.toUInt8 k
+      len.toNat mem' hk (by omega) hfill
+    rw [this]
+    simp [BitVec.ofNat_toNat, BitVec.setWidth_eq, Nat.toUInt8, UInt8.toNat]
+  next => simp at hfill
+
+end WasmNum.Memory.Proofs
