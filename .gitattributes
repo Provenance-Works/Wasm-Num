@@ -1,0 +1,40 @@
+# =============================================================================
+# Git Attributes — wasm-num
+# =============================================================================
+# Normalize line endings and configure linguist for GitHub language statistics.
+# =============================================================================
+
+# Auto-detect text files and normalize line endings to LF
+* text=auto eol=lf
+
+# Lean source files
+*.lean text eol=lf linguist-language=Lean
+
+# Configuration
+*.toml text eol=lf
+*.json text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+
+# Documentation
+*.md   text eol=lf
+*.txt  text eol=lf
+
+# Shell scripts
+*.sh   text eol=lf
+
+# Git config
+.gitattributes text eol=lf
+.gitignore     text eol=lf
+.editorconfig  text eol=lf
+
+# Exclude from language statistics
+docs/**        linguist-documentation
+WasmTest/**    linguist-detectable=false
+
+# Binary files (none currently, but future-proofing)
+*.png  binary
+*.jpg  binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
