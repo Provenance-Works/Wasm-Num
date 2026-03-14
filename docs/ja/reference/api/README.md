@@ -1,26 +1,26 @@
-# API Reference
+# APIリファレンス
 
-> **Audience**: Developers
+> **対象読者**: 開発者
 
-Complete API documentation for wasm-num, organized by architectural layer.
+wasm-num の完全な API ドキュメント。アーキテクチャレイヤー別に整理。
 
-## Modules by Layer
+## レイヤー別モジュール
 
-### Layer 0: Foundation
+### レイヤー 0: Foundation
 
-| Module | Import Path | Documentation |
-|--------|-------------|---------------|
+| モジュール | インポートパス | ドキュメント |
+|-----------|-------------|------------|
 | Types | `WasmNum.Foundation.Types` | [foundation.md](foundation.md) |
 | BitVecOps | `WasmNum.Foundation.BitVec` | [foundation.md](foundation.md#bitvecops) |
-| WasmFloat | `WasmNum.Foundation.WasmFloat` | [foundation.md](foundation.md#wasmfloat-typeclass) |
-| WasmFloat Default | `WasmNum.Foundation.WasmFloat.Default` | [foundation.md](foundation.md#wasmfloat-default-stub) |
-| Profiles | `WasmNum.Foundation.Profile` | [foundation.md](foundation.md#profiles) |
-| Defs | `WasmNum.Foundation.Defs` | [foundation.md](foundation.md#basic-definitions) |
+| WasmFloat | `WasmNum.Foundation.WasmFloat` | [foundation.md](foundation.md#wasmfloat-型クラス) |
+| WasmFloat Default | `WasmNum.Foundation.WasmFloat.Default` | [foundation.md](foundation.md#wasmfloat-デフォルトスタブ) |
+| Profiles | `WasmNum.Foundation.Profile` | [foundation.md](foundation.md#プロファイル) |
+| Defs | `WasmNum.Foundation.Defs` | [foundation.md](foundation.md#基本定義) |
 
-### Layer 1: Numerics
+### レイヤー 1: Numerics
 
-| Module | Import Path | Documentation |
-|--------|-------------|---------------|
+| モジュール | インポートパス | ドキュメント |
+|-----------|-------------|------------|
 | NaN Propagation | `WasmNum.Numerics.NaN.Propagation` | [numerics.md](numerics.md#nan-propagation) |
 | NaN Deterministic | `WasmNum.Numerics.NaN.Deterministic` | [numerics.md](numerics.md#nan-deterministic) |
 | Float MinMax | `WasmNum.Numerics.Float.MinMax` | [numerics.md](numerics.md#float-minmax) |
@@ -45,10 +45,10 @@ Complete API documentation for wasm-num, organized by architectural layer.
 | Reinterpret | `WasmNum.Numerics.Conversion.Reinterpret` | [numerics.md](numerics.md#conversion-reinterpret) |
 | IntWidth | `WasmNum.Numerics.Conversion.IntWidth` | [numerics.md](numerics.md#conversion-intwidth) |
 
-### Layer 2: SIMD
+### レイヤー 2: SIMD
 
-| Module | Import Path | Documentation |
-|--------|-------------|---------------|
+| モジュール | インポートパス | ドキュメント |
+|-----------|-------------|------------|
 | V128 Shape | `WasmNum.SIMD.V128.Shape` | [simd.md](simd.md#v128-shape) |
 | V128 Type | `WasmNum.SIMD.V128.Type` | [simd.md](simd.md#v128-type) |
 | V128 Lanes | `WasmNum.SIMD.V128.Lanes` | [simd.md](simd.md#v128-lanes) |
@@ -71,10 +71,10 @@ Complete API documentation for wasm-num, organized by architectural layer.
 | Relaxed Dot | `WasmNum.SIMD.Relaxed.Dot` | [simd.md](simd.md#relaxed-dot) |
 | Relaxed Q15 | `WasmNum.SIMD.Relaxed.Q15` | [simd.md](simd.md#relaxed-q15) |
 
-### Layer 3: Memory
+### レイヤー 3: Memory
 
-| Module | Import Path | Documentation |
-|--------|-------------|---------------|
+| モジュール | インポートパス | ドキュメント |
+|-----------|-------------|------------|
 | Page | `WasmNum.Memory.Core.Page` | [memory.md](memory.md#page-model) |
 | FlatMemory | `WasmNum.Memory.Core.FlatMemory` | [memory.md](memory.md#flatmemory) |
 | Address | `WasmNum.Memory.Core.Address` | [memory.md](memory.md#address) |
@@ -94,24 +94,15 @@ Complete API documentation for wasm-num, organized by architectural layer.
 | MultiMemory | `WasmNum.Memory.MultiMemory` | [memory.md](memory.md#multimemory) |
 | Memory64 | `WasmNum.Memory.Memory64` | [memory.md](memory.md#memory64) |
 
-### Layer 4: Integration
+### レイヤー 4: Integration
 
-| Module | Import Path | Documentation |
-|--------|-------------|---------------|
-| Profile | `WasmNum.Integration.Profile` | [integration.md](integration.md#deterministicwasmprofile) |
-| Runtime | `WasmNum.Integration.Runtime` | [integration.md](integration.md#runtime-wrappers) |
+| モジュール | インポートパス | ドキュメント |
+|-----------|-------------|------------|
+| DeterministicWasmProfile | `WasmNum.Integration.Profile` | [integration.md](integration.md) |
+| Runtime | `WasmNum.Integration.Runtime` | [integration.md](integration.md#ランタイムラッパー) |
 
-## Import Shortcuts
+## 関連ドキュメント
 
-```lean
--- Everything (definitions only)
-import WasmNum
-
--- Everything (definitions + proofs)
-import WasmNumProofs
-```
-
-## See Also
-
-- [Architecture](../../architecture/) — system design
-- [Glossary](../glossary.md) — domain terminology
+- [アーキテクチャ](../../architecture/) — システム設計
+- [用語集](../glossary.md) — 用語の定義
+- [English Version](../../../en/reference/api/)

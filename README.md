@@ -19,7 +19,7 @@
 - **Full SIMD Coverage** — V128 operations, 12 lane shapes, lanewise integer/float ops, shuffle, swizzle, narrowing/widening, and all relaxed SIMD proposals.
 - **Linear Memory Model** — FlatMemory with page management, scalar/packed/SIMD loads and stores, memory.grow/copy/fill/init, multi-memory, and Memory64 support.
 - **Machine-Checked Proofs** — Load–store roundtrip, lane bijections, NaN propagation correctness, deterministic-implies-spec, bounds safety, overlap correctness, and more.
-- **IEEE 754 Independence** — The `WasmFloat` typeclass abstracts over any IEEE 754 implementation via [ADR-001](docs/design/adr/0001-typeclass-mediated-754-independence.md). Plug in your own float library.
+- **IEEE 754 Independence** — The `WasmFloat` typeclass abstracts over any IEEE 754 implementation via [ADR-001](docs/en/design/adr/0001-ieee754-independence-via-wasmfloat.md). Plug in your own float library.
 - **Non-determinism as Sets** — Spec-level non-determinism (NaN payloads, relaxed SIMD, memory.grow) is modeled as `Set α`, enabling both proof reasoning and deterministic runtime instantiation via profiles.
 - **Built on Mathlib** — Leverages `BitVec`, `Finset`, and Mathlib's algebraic infrastructure.
 
@@ -95,9 +95,9 @@ Non-deterministic operations return `Set α` at the spec level. The `WasmProfile
 
 For more details, see:
 
-- [Architecture](docs/architecture/)
-- [Design Decisions (ADRs)](docs/design/adr/)
-- [Full Documentation](docs/)
+- [Architecture](docs/en/architecture/)
+- [Design Decisions (ADRs)](docs/en/design/adr/)
+- [Full Documentation](docs/) (English / 日本語)
 
 ## Module Map
 
@@ -153,13 +153,13 @@ import WasmNum.Memory.Core.FlatMemory
 
 | ADR | Decision |
 |-----|----------|
-| [ADR-001](docs/design/adr/0001-typeclass-mediated-754-independence.md) | IEEE 754 independence via `WasmFloat` typeclass |
-| [ADR-002](docs/design/adr/0002-bitvec-universal-representation.md) | `BitVec N` as universal representation for all numeric types |
-| [ADR-003](docs/design/adr/0003-nondeterminism-as-sets.md) | Non-determinism modeled as `Set α` |
-| [ADR-004](docs/design/adr/0004-v128-shape-system.md) | V128 shape system for SIMD lane types |
-| [ADR-005](docs/design/adr/0005-flatmemory-parameterized-address-width.md) | `FlatMemory` parameterized by address width |
-| [ADR-006](docs/design/adr/0006-proof-separation.md) | Strict separation of definitions and proofs |
-| [ADR-007](docs/design/adr/0007-no-c-ffi.md) | No C FFI — pure Lean only |
+| [ADR-001](docs/en/design/adr/0001-ieee754-independence-via-wasmfloat.md) | IEEE 754 independence via `WasmFloat` typeclass |
+| [ADR-002](docs/en/design/adr/0002-bitvec-as-universal-representation.md) | `BitVec N` as universal representation for all numeric types |
+| [ADR-003](docs/en/design/adr/0003-nondeterminism-as-sets.md) | Non-determinism modeled as `Set α` |
+| [ADR-004](docs/en/design/adr/0004-v128-shape-system.md) | V128 shape system for SIMD lane types |
+| [ADR-005](docs/en/design/adr/0005-flatmemory-parameterized-address-width.md) | `FlatMemory` parameterized by address width |
+| [ADR-006](docs/en/design/adr/0006-proof-separation.md) | Strict separation of definitions and proofs |
+| [ADR-007](docs/en/design/adr/0007-no-c-ffi.md) | No C FFI — pure Lean only |
 
 ## Contributing
 

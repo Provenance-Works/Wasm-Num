@@ -22,7 +22,7 @@
 - [ ] My code follows the project's style guide (snake_case defs, CamelCase types, `autoImplicit = false`)
 - [ ] I have performed a self-review of my code
 - [ ] I have added/updated doc comments for public definitions
-- [ ] Definitions and proofs are properly separated ([ADR-006](docs/design/adr/0006-proof-separation.md))
+- [ ] Definitions and proofs are properly separated ([ADR-006](docs/en/design/adr/0006-proof-separation.md))
 - [ ] There are no `sorry` in definitions or proofs (excluding marked stubs)
 - [ ] `lake build` succeeds with no errors
 - [ ] I have added `#eval` tests for new definitions (if deterministic)
