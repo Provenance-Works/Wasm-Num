@@ -1,0 +1,66 @@
+name: "\u2728 Feature Request"
+description: Suggest a new feature, definition, proof, or improvement.
+title: "[Feature]: "
+labels: ["enhancement", "triage"]
+assignees: ["Aqua-218"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting an improvement! Please describe your idea below.
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      description: What kind of feature is this?
+      options:
+        - New Wasm instruction formalization
+        - New proof or theorem
+        - Improved test coverage
+        - Documentation improvement
+        - Developer experience / tooling
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Motivation
+      description: What problem does this solve? Why is it needed?
+      placeholder: "Currently wasm-num doesn't formalize the `memory.atomic.*` instructions from the threads proposal..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the feature or change you'd like.
+    validations:
+      required: true
+
+  - type: textarea
+    id: spec-reference
+    attributes:
+      label: Wasm Spec Reference
+      description: Link to or quote the relevant WebAssembly specification section, if applicable.
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: What other approaches did you consider?
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other information (diagrams, examples, related projects, etc.)
+    validations:
+      required: false
