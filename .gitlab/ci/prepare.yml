@@ -1,0 +1,104 @@
+# =============================================================================
+# Stage: prepare — Toolchain Setup & Dependency Resolution
+# =============================================================================
+# Ensures elan (Lean toolchain manager) is installed, the correct Lean version
+# is active, and Mathlib pre-built oleans are fetched from the CDN cache.
+# =============================================================================
+
+setup_toolchain:
+  stage: prepare
+  tags:
+    - normal
+  timeout: 30m
+  interruptible: true
+  cache:
+    - key:
+        files:
+          - lean-toolchain
+          - lake-manifest.json
+      paths:
+        - .lake/packages/
+      policy: pull-push
+  script:
+    - export PATH="$ELAN_HOME/bin:$PATH"
+
+    # --- Install elan if not present ---
+    - |
+      if ! command -v elan &> /dev/null; then
+        echo "=== Installing elan ==="
+        curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh -s -- -y --default-toolchain none
+        export PATH="$ELAN_HOME/bin:$PATH"
+      fi
+
+    # --- Set toolchain from lean-toolchain ---
+    - |
+      TOOLCHAIN=$(cat lean-toolchain | tr -d '[:space:]')
+      echo "=== Setting toolchain: $TOOLCHAIN ==="
+      elan toolchain install "$TOOLCHAIN"
+      elan default "$TOOLCHAIN"
+
+    # --- Verify installation ---
+    - elan show
+    - lean --version
+    - lake --version
+
+    # --- Resolve packages ---
+    - |
+      echo "=== Resolving Lake packages ==="
+      lake resolve || lake update
+
+    # --- Fetch Mathlib cache ---
+    - |
+      echo "=== Fetching Mathlib pre-built cache ==="
+      lake exe cache get || {
+        echo "WARNING: Mathlib cache fetch failed — build will compile from source"
+        echo "This will significantly increase build time"
+      }
+
+    # --- Report cache status ---
+    - |
+      echo "=== Cache status ==="
+      if [ -d ".lake/packages/mathlib" ]; then
+        echo "Mathlib package: present"
+        echo "Mathlib .lake/build: $(du -sh .lake/packages/mathlib/.lake/build 2>/dev/null | cut -f1 || echo 'not cached')"
+      else
+        echo "Mathlib package: NOT FOUND"
+      fi
+      echo "Project .lake/build: $(du -sh .lake/build 2>/dev/null | cut -f1 || echo 'empty')"
+  rules:
+    - when: always
+
+warmup_cache:
+  stage: prepare
+  tags:
+    - normal
+  timeout: 10m
+  interruptible: true
+  needs: []
+  cache:
+    - key:
+        files:
+          - lean-toolchain
+          - lake-manifest.json
+      paths:
+        - .lake/packages/
+      policy: pull
+  script:
+    - export PATH="$ELAN_HOME/bin:$PATH"
+    - |
+      echo "=== Verifying toolchain availability ==="
+      if command -v lean &> /dev/null; then
+        echo "Lean toolchain: $(lean --version)"
+        echo "Lake: $(lake --version)"
+      else
+        echo "Lean toolchain not yet available — will be set up in setup_toolchain"
+      fi
+    - |
+      echo "=== Workspace information ==="
+      echo "Pipeline type: ${PIPELINE_TYPE:-unknown}"
+      echo "Commit: $CI_COMMIT_SHORT_SHA"
+      echo "Branch: $CI_COMMIT_REF_NAME"
+      echo "Runner: $CI_RUNNER_DESCRIPTION ($CI_RUNNER_ID)"
+  rules:
+    - when: always
+  allow_failure: true
