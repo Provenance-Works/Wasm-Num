@@ -160,30 +160,6 @@ WasmNum/
     └── SIMD/                     # SIMD proofs (Ops, Relaxed, V128)
 ```
 
-## Proofs/ — Standalone Proof Placeholders
-
-The `Proofs/` directory at the repository root contains empty placeholder directories (`.gitkeep` only) reserved for future standalone proofs. All current proofs reside in `WasmNum/Proofs/`.
-
-```
-Proofs/
-├── Foundation/                   # (placeholder — .gitkeep only)
-├── Integration/                  # (placeholder — .gitkeep only)
-├── Memory/
-│   ├── Core/                     # (placeholder — .gitkeep only)
-│   ├── Load/                     # (placeholder — .gitkeep only)
-│   ├── Ops/                      # (placeholder — .gitkeep only)
-│   └── Store/                    # (placeholder — .gitkeep only)
-├── Numerics/
-│   ├── Conversion/               # (placeholder — .gitkeep only)
-│   ├── Float/                    # (placeholder — .gitkeep only)
-│   ├── Integer/                  # (placeholder — .gitkeep only)
-│   └── NaN/                      # (placeholder — .gitkeep only)
-└── SIMD/
-    ├── Ops/                      # (placeholder — .gitkeep only)
-    ├── Relaxed/                  # (placeholder — .gitkeep only)
-    └── V128/                     # (placeholder — .gitkeep only)
-```
-
 ## WasmTest/ — Test Suite
 
 ```
