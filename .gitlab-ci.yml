@@ -45,7 +45,6 @@ workflow:
 
 # --- Stage definitions ---
 stages:
-  - prepare
   - validate
   - build
   - test
@@ -57,7 +56,7 @@ stages:
 variables:
   GIT_DEPTH: 50
   GIT_STRATEGY: fetch
-  LAKE_WORKERS: "4"
+  LAKE_WORKERS: "0"
   # Lean/elan environment
   ELAN_HOME: "$HOME/.elan"
   PATH_OVERRIDE: "$HOME/.elan/bin:$PATH"
@@ -109,7 +108,6 @@ default:
 
 # --- Modular pipeline includes ---
 include:
-  - local: ".gitlab/ci/prepare.yml"
   - local: ".gitlab/ci/validate.yml"
   - local: ".gitlab/ci/build.yml"
   - local: ".gitlab/ci/test.yml"
