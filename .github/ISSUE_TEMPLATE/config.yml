@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: "\U0001F4AC Questions & Discussion"
+    url: https://github.com/Provenance-Works/wasm-num/discussions
+    about: Ask questions and discuss ideas in GitHub Discussions.
+  - name: "\U0001F4D6 Documentation"
+    url: https://github.com/Provenance-Works/wasm-num/tree/main/docs
+    about: Read the project documentation before opening an issue.
+  - name: "\U0001F512 Security Vulnerability"
+    url: https://github.com/Provenance-Works/wasm-num/security/advisories/new
+    about: Report security vulnerabilities privately. Do NOT open a public issue.
