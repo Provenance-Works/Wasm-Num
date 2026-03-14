@@ -1,0 +1,27 @@
+# =============================================================================
+# CODEOWNERS — wasm-num
+# =============================================================================
+# Defines code ownership for automated review requests.
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+# =============================================================================
+
+# Default — all files
+*                           @Aqua-218
+
+# CI/CD pipeline configuration (require review for security)
+.github/                    @Aqua-218
+.gitlab-ci.yml              @Aqua-218
+.gitlab/                    @Aqua-218
+
+# Core foundation (changes here affect everything)
+WasmNum/Foundation/         @Aqua-218
+
+# Formal proofs (high-trust changes)
+WasmNum/Proofs/             @Aqua-218
+Proofs/                     @Aqua-218
+WasmNumProofs.lean          @Aqua-218
+
+# Project configuration
+lakefile.toml               @Aqua-218
+lean-toolchain              @Aqua-218
+lake-manifest.json          @Aqua-218
