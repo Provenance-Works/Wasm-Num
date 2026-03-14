@@ -1,0 +1,895 @@
+# =============================================================================
+# CI Pipeline — Lean 4 Formal Verification (wasm-num)
+# =============================================================================
+# Multi-stage enterprise CI pipeline for a Lean 4 + Mathlib formal verification
+# project. Validates source quality, builds all targets (definitions, proofs,
+# tests), and performs post-build analysis (axiom audit, sorry detection,
+# proof metrics).
+#
+# Runner: Self-hosted ARC (Actions Runner Controller) on Kubernetes
+# Key dependency: leanprover-community/mathlib4 (cached via lean-action)
+# =============================================================================
+
+name: "CI — Formal Verification Pipeline"
+run-name: "${{ github.actor }} — ${{ github.event_name }} on ${{ github.ref_name }}"
+
+on:
+  push:
+    branches: [main, develop, release/*, hotfix/*]
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
+      - "LICENSE"
+      - ".gitignore"
+      - ".github/dependabot.yml"
+      - ".github/CODEOWNERS"
+  pull_request:
+    branches: [main, develop, release/*]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      skip_cache:
+        description: "Skip Mathlib cache (force full rebuild)"
+        required: false
+        type: boolean
+        default: false
+      verbose:
+        description: "Enable verbose Lake output"
+        required: false
+        type: boolean
+        default: false
+      build_workers:
+        description: "Number of Lake build workers"
+        required: false
+        type: number
+        default: 4
+
+# Workflow-level least-privilege permissions
+permissions:
+  contents: read
+
+# Prevent duplicate pipeline runs for the same ref
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  LAKE_WORKERS: ${{ inputs.build_workers || 4 }}
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Stage 1: Pre-flight Validation (fast, parallel, no build required)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  sorry-scan:
+    name: "Sorry Detection (Pre-build)"
+    runs-on: arc-runner-set-pw
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      sorry_found_lib: ${{ steps.scan-lib.outputs.found }}
+      sorry_count_lib: ${{ steps.scan-lib.outputs.count }}
+      sorry_found_proofs: ${{ steps.scan-proofs.outputs.found }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Scan library sources for sorry
+        id: scan-lib
+        shell: bash
+        run: |
+          echo "=== Scanning WasmNum/ (excluding Proofs/) for sorry ==="
+          sorry_hits=$(grep -rn '\bsorry\b' WasmNum/ \
+            --include="*.lean" \
+            --exclude-dir="Proofs" \
+            | grep -v '^\s*--' \
+            | grep -v 'CI:allow-sorry' \
+            || true)
+
+          if [ -n "$sorry_hits" ]; then
+            count=$(echo "$sorry_hits" | wc -l)
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "count=$count" >> "$GITHUB_OUTPUT"
+
+            echo "::warning::sorry found in $count location(s) in library sources"
+            echo "### Sorry in Library Sources" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "| File | Line | Content |" >> "$GITHUB_STEP_SUMMARY"
+            echo "|------|------|---------|" >> "$GITHUB_STEP_SUMMARY"
+            echo "$sorry_hits" | head -50 | while IFS=: read -r file line content; do
+              echo "| \`$file\` | $line | \`$(echo "$content" | sed 's/|/\\|/g' | head -c 80)\` |" >> "$GITHUB_STEP_SUMMARY"
+            done
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "count=0" >> "$GITHUB_OUTPUT"
+            echo "### Library Sorry Scan: Clean" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Scan proof files for sorry (BLOCKING)
+        id: scan-proofs
+        shell: bash
+        run: |
+          echo "=== Scanning proof files for sorry ==="
+          proof_sorry=""
+
+          # Check WasmNum/Proofs/
+          if [ -d "WasmNum/Proofs" ]; then
+            hits=$(grep -rn '\bsorry\b' WasmNum/Proofs/ \
+              --include="*.lean" \
+              | grep -v '^\s*--' \
+              | grep -v 'CI:allow-sorry' \
+              || true)
+            proof_sorry="$hits"
+          fi
+
+          # Check top-level Proofs/
+          if [ -d "Proofs" ]; then
+            hits=$(grep -rn '\bsorry\b' Proofs/ \
+              --include="*.lean" \
+              | grep -v '^\s*--' \
+              | grep -v 'CI:allow-sorry' \
+              || true)
+            proof_sorry="${proof_sorry}${hits}"
+          fi
+
+          if [ -n "$proof_sorry" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "::error::sorry found in proof files — this BLOCKS the pipeline"
+            echo "$proof_sorry"
+            echo "### FATAL: Sorry in Proof Files" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            echo "$proof_sorry" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "### Proof Sorry Scan: Clean" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  lint-sources:
+    name: "Source Quality Lint"
+    runs-on: arc-runner-set-pw
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check for debugging leftovers
+        shell: bash
+        run: |
+          exit_code=0
+
+          echo "=== Checking for dbg_trace (BLOCKING) ==="
+          dbg_hits=$(grep -rn 'dbg_trace' WasmNum/ --include="*.lean" | grep -v 'CI:allow' || true)
+          if [ -n "$dbg_hits" ]; then
+            echo "::error::dbg_trace found in library sources:"
+            echo "$dbg_hits"
+            exit_code=1
+          fi
+
+          echo "=== Checking for #eval in library sources ==="
+          eval_hits=$(grep -rn '#eval' WasmNum/ --include="*.lean" \
+            | grep -v '^\s*--' \
+            | grep -v 'CI:allow' \
+            || true)
+          if [ -n "$eval_hits" ]; then
+            echo "::warning::#eval found in library sources (use 'CI:allow' comment to suppress):"
+            echo "$eval_hits"
+          fi
+
+          echo "=== Checking for #check debugging ==="
+          check_hits=$(grep -rn '#check' WasmNum/ --include="*.lean" \
+            | grep -v '^\s*--' \
+            | grep -v 'CI:allow' \
+            || true)
+          if [ -n "$check_hits" ]; then
+            echo "::warning::#check found in library sources:"
+            echo "$check_hits"
+          fi
+
+          echo "=== Checking for panic! in library ==="
+          panic_hits=$(grep -rn 'panic!' WasmNum/ --include="*.lean" | grep -v 'CI:allow' || true)
+          if [ -n "$panic_hits" ]; then
+            echo "::warning::panic! found in library sources:"
+            echo "$panic_hits"
+          fi
+
+          exit $exit_code
+
+      - name: Validate project configuration
+        shell: bash
+        run: |
+          echo "=== Verifying lean-toolchain ==="
+          toolchain=$(cat lean-toolchain | tr -d '[:space:]')
+          if [[ ! "$toolchain" =~ ^leanprover/lean4:v[0-9]+\.[0-9]+ ]]; then
+            echo "::error::Invalid lean-toolchain format: '$toolchain'"
+            exit 1
+          fi
+          echo "Lean toolchain: $toolchain"
+
+          echo "=== Verifying lakefile.toml ==="
+          if ! grep -q 'name = "wasm-num"' lakefile.toml; then
+            echo "::error::lakefile.toml missing project name"
+            exit 1
+          fi
+          if ! grep -q 'mathlib' lakefile.toml; then
+            echo "::error::lakefile.toml missing mathlib dependency"
+            exit 1
+          fi
+
+          echo "=== Verifying lake-manifest.json ==="
+          if [ ! -f lake-manifest.json ]; then
+            echo "::error::lake-manifest.json is missing"
+            exit 1
+          fi
+          # Validate JSON syntax
+          python3 -c "import json; json.load(open('lake-manifest.json'))" 2>/dev/null \
+            || echo "::warning::Could not validate lake-manifest.json (python3 not available)"
+
+          echo "### Project Configuration: Valid" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Toolchain: \`$toolchain\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check import consistency
+        shell: bash
+        run: |
+          echo "=== Checking root import files ==="
+          # Verify WasmNum.lean and WasmNumProofs.lean exist and are non-empty
+          for f in WasmNum.lean WasmNumProofs.lean TestAll.lean; do
+            if [ ! -s "$f" ]; then
+              echo "::error::Root import file $f is missing or empty"
+              exit 1
+            fi
+            echo "$f: OK ($(wc -l < "$f") lines)"
+          done
+
+  secret-detection:
+    name: "Secret Detection"
+    runs-on: arc-runner-set-pw
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run secret scan
+        shell: bash
+        run: |
+          echo "=== Secret detection scan ==="
+          # Pattern-based secret detection for common secret formats
+          found=0
+
+          # AWS keys
+          if grep -rn 'AKIA[0-9A-Z]\{16\}' --include="*.lean" --include="*.toml" --include="*.json" . 2>/dev/null; then
+            echo "::error::Possible AWS access key detected"
+            found=1
+          fi
+
+          # Private keys
+          if grep -rn 'BEGIN.*PRIVATE KEY' --include="*.lean" --include="*.toml" --include="*.json" . 2>/dev/null; then
+            echo "::error::Possible private key detected"
+            found=1
+          fi
+
+          # Generic high-entropy secrets (API keys, tokens)
+          if grep -rn 'password\s*=\s*"[^"]\{8,\}"' --include="*.lean" --include="*.toml" --include="*.json" . 2>/dev/null; then
+            echo "::error::Possible hardcoded password detected"
+            found=1
+          fi
+
+          # GitHub tokens
+          if grep -rn 'ghp_[a-zA-Z0-9]\{36\}\|gho_[a-zA-Z0-9]\{36\}\|github_pat_' --include="*.lean" --include="*.toml" --include="*.json" . 2>/dev/null; then
+            echo "::error::Possible GitHub token detected"
+            found=1
+          fi
+
+          if [ "$found" -eq 1 ]; then
+            exit 1
+          fi
+
+          echo "### Secret Detection: Clean" >> "$GITHUB_STEP_SUMMARY"
+
+  dependency-review:
+    name: "Dependency Review"
+    runs-on: arc-runner-set-pw
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Audit dependency manifest
+        shell: bash
+        run: |
+          echo "### Dependency Audit" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "=== Checking lake-manifest.json ==="
+          # Extract dependency information
+          deps=$(python3 -c "
+          import json
+          with open('lake-manifest.json') as f:
+              data = json.load(f)
+          for pkg in data.get('packages', []):
+              name = pkg.get('name', 'unknown')
+              rev = pkg.get('rev', 'unknown')[:12]
+              url = pkg.get('url', 'unknown')
+              inherited = pkg.get('inherited', False)
+              marker = '(transitive)' if inherited else '(direct)'
+              print(f'| \`{name}\` | \`{rev}\` | {marker} |')
+          " 2>/dev/null || echo "| (python3 unavailable) | - | - |")
+
+          echo "| Package | Revision | Type |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---------|----------|------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "$deps" >> "$GITHUB_STEP_SUMMARY"
+
+          # Count dependencies
+          total=$(python3 -c "
+          import json
+          with open('lake-manifest.json') as f:
+              data = json.load(f)
+          print(len(data.get('packages', [])))
+          " 2>/dev/null || echo "?")
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Total dependencies:** $total" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check for pinned revisions
+        shell: bash
+        run: |
+          echo "=== Verifying all dependencies are pinned ==="
+          unpinned=$(python3 -c "
+          import json
+          with open('lake-manifest.json') as f:
+              data = json.load(f)
+          for pkg in data.get('packages', []):
+              rev = pkg.get('rev', '')
+              if len(rev) < 40:
+                  print(f\"WARNING: {pkg.get('name')} has short rev: {rev}\")
+          " 2>/dev/null || true)
+
+          if [ -n "$unpinned" ]; then
+            echo "::warning::Some dependencies may not be fully pinned:"
+            echo "$unpinned"
+          else
+            echo "All dependencies are pinned to full commit SHAs"
+          fi
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Stage 2: Build (sequential with cache sharing)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  build-definitions:
+    name: "Build WasmNum (Definitions)"
+    needs: [lint-sources]
+    runs-on: arc-runner-set-pw
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    outputs:
+      build_duration: ${{ steps.timer.outputs.duration }}
+      cache_hit: ${{ steps.restore-cache.outputs.cache-hit }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Lean toolchain + Mathlib cache
+        uses: leanprover/lean-action@v1
+        with:
+          use-mathlib-cache: ${{ inputs.skip_cache != true }}
+          build: false
+
+      - name: Restore project build cache
+        id: restore-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            .lake/build/lib
+            .lake/build/ir
+          key: lake-build-lib-${{ hashFiles('lean-toolchain', 'lake-manifest.json', 'lakefile.toml') }}-${{ github.sha }}
+          restore-keys: |
+            lake-build-lib-${{ hashFiles('lean-toolchain', 'lake-manifest.json', 'lakefile.toml') }}-
+
+      - name: Build WasmNum definitions
+        id: build
+        shell: bash
+        run: |
+          echo "=== Building WasmNum ==="
+          start_time=$(date +%s)
+
+          if [ "${{ inputs.verbose }}" = "true" ]; then
+            lake build WasmNum -v 2>&1 | tee build-definitions.log
+          else
+            lake build WasmNum 2>&1 | tee build-definitions.log
+          fi
+
+          end_time=$(date +%s)
+          duration=$((end_time - start_time))
+          echo "Build completed in ${duration}s"
+          echo "duration=${duration}" >> "$GITHUB_OUTPUT"
+
+      - name: Check build output for warnings
+        shell: bash
+        run: |
+          echo "=== Checking build output ==="
+          warnings=$(grep -c 'warning:' build-definitions.log || true)
+          errors=$(grep -c 'error:' build-definitions.log || true)
+          sorries=$(grep -ci 'sorry' build-definitions.log || true)
+
+          echo "### Build WasmNum" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Duration: ${{ steps.build.outputs.duration }}s" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Warnings: $warnings" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Errors: $errors" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Sorry references: $sorries" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$errors" -gt 0 ]; then
+            echo "::error::Build produced $errors error(s)"
+            exit 1
+          fi
+
+      - name: Record build timing
+        id: timer
+        shell: bash
+        run: echo "duration=${{ steps.build.outputs.duration }}" >> "$GITHUB_OUTPUT"
+
+      - name: Save project build cache
+        if: always() && steps.build.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .lake/build/lib
+            .lake/build/ir
+          key: lake-build-lib-${{ hashFiles('lean-toolchain', 'lake-manifest.json', 'lakefile.toml') }}-${{ github.sha }}
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-definitions-log
+          path: build-definitions.log
+          retention-days: 14
+
+  build-proofs:
+    name: "Build WasmNumProofs (Formal Proofs)"
+    needs: [build-definitions]
+    runs-on: arc-runner-set-pw
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    outputs:
+      build_duration: ${{ steps.timer.outputs.duration }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Lean toolchain + Mathlib cache
+        uses: leanprover/lean-action@v1
+        with:
+          use-mathlib-cache: ${{ inputs.skip_cache != true }}
+          build: false
+
+      - name: Restore definitions build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            .lake/build/lib
+            .lake/build/ir
+          key: lake-build-lib-${{ hashFiles('lean-toolchain', 'lake-manifest.json', 'lakefile.toml') }}-${{ github.sha }}
+
+      - name: Build WasmNumProofs
+        id: build
+        shell: bash
+        run: |
+          echo "=== Building WasmNumProofs ==="
+          start_time=$(date +%s)
+          lake build WasmNumProofs 2>&1 | tee build-proofs.log
+          end_time=$(date +%s)
+          duration=$((end_time - start_time))
+          echo "Build completed in ${duration}s"
+          echo "duration=${duration}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify no sorry in proof build output
+        shell: bash
+        run: |
+          echo "=== Post-build sorry verification ==="
+          # Lake emits "warning: declaration uses 'sorry'" for unfinished proofs
+          sorry_warnings=$(grep -i "sorry" build-proofs.log || true)
+
+          if [ -n "$sorry_warnings" ]; then
+            echo "::error::Proof build output references sorry — proofs are incomplete"
+            echo "$sorry_warnings"
+            echo "### FATAL: Sorry in Proof Build" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            echo "$sorry_warnings" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          echo "### Proof Build: No sorry detected" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check build output for errors
+        shell: bash
+        run: |
+          errors=$(grep -c 'error:' build-proofs.log || true)
+          warnings=$(grep -c 'warning:' build-proofs.log || true)
+
+          echo "### Build WasmNumProofs" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Duration: ${{ steps.build.outputs.duration }}s" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Warnings: $warnings" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Errors: $errors" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record build timing
+        id: timer
+        shell: bash
+        run: echo "duration=${{ steps.build.outputs.duration }}" >> "$GITHUB_OUTPUT"
+
+      - name: Save full build cache (lib + proofs)
+        if: always() && steps.build.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .lake/build/lib
+            .lake/build/ir
+          key: lake-build-full-${{ hashFiles('lean-toolchain', 'lake-manifest.json', 'lakefile.toml') }}-${{ github.sha }}
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-proofs-log
+          path: build-proofs.log
+          retention-days: 14
+
+  build-tests:
+    name: "Build & Execute Tests"
+    needs: [build-definitions]
+    runs-on: arc-runner-set-pw
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    outputs:
+      build_duration: ${{ steps.timer.outputs.duration }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Lean toolchain + Mathlib cache
+        uses: leanprover/lean-action@v1
+        with:
+          use-mathlib-cache: ${{ inputs.skip_cache != true }}
+          build: false
+
+      - name: Restore definitions build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            .lake/build/lib
+            .lake/build/ir
+          key: lake-build-lib-${{ hashFiles('lean-toolchain', 'lake-manifest.json', 'lakefile.toml') }}-${{ github.sha }}
+
+      - name: Build TestAll
+        id: build
+        shell: bash
+        run: |
+          echo "=== Building TestAll ==="
+          start_time=$(date +%s)
+          lake build TestAll 2>&1 | tee build-tests.log
+          end_time=$(date +%s)
+          duration=$((end_time - start_time))
+          echo "Build completed in ${duration}s"
+          echo "duration=${duration}" >> "$GITHUB_OUTPUT"
+
+      - name: Analyze test build output
+        shell: bash
+        run: |
+          errors=$(grep -c 'error:' build-tests.log || true)
+          warnings=$(grep -c 'warning:' build-tests.log || true)
+
+          echo "### Build TestAll" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Duration: ${{ steps.build.outputs.duration }}s" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Warnings: $warnings" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Errors: $errors" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$errors" -gt 0 ]; then
+            echo "::error::Test build produced $errors error(s)"
+            exit 1
+          fi
+
+      - name: Record build timing
+        id: timer
+        shell: bash
+        run: echo "duration=${{ steps.build.outputs.duration }}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload test build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-tests-log
+          path: build-tests.log
+          retention-days: 14
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Stage 3: Post-build Deep Analysis
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  axiom-audit:
+    name: "Axiom & Foundation Audit"
+    needs: [build-proofs]
+    runs-on: arc-runner-set-pw
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Audit axiom usage
+        shell: bash
+        run: |
+          echo "### Axiom & Foundation Audit" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          # --- Custom axiom declarations ---
+          echo "#### Custom Axioms" >> "$GITHUB_STEP_SUMMARY"
+          custom_axioms=$(grep -rn '^axiom ' WasmNum/ Proofs/ --include="*.lean" 2>/dev/null || true)
+          if [ -n "$custom_axioms" ]; then
+            count=$(echo "$custom_axioms" | wc -l)
+            echo "::warning::$count custom axiom(s) found"
+            echo '```lean' >> "$GITHUB_STEP_SUMMARY"
+            echo "$custom_axioms" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No custom axioms declared." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          # --- noncomputable usage ---
+          echo "#### Noncomputable Declarations" >> "$GITHUB_STEP_SUMMARY"
+          noncomp_count=$(grep -rc 'noncomputable' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+          echo "Count: **$noncomp_count**" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          # --- Classical logic usage ---
+          echo "#### Classical Logic Usage" >> "$GITHUB_STEP_SUMMARY"
+          classical_count=$(grep -rc 'Classical\.' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+          echo "Count: **$classical_count**" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          # --- Decidability instances ---
+          echo "#### Decidability" >> "$GITHUB_STEP_SUMMARY"
+          decidable_count=$(grep -rc 'Decidable\|DecidableEq\|decEq' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+          echo "Decidable references: **$decidable_count**" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          # --- unsafe usage ---
+          echo "#### Unsafe Usage" >> "$GITHUB_STEP_SUMMARY"
+          unsafe_count=$(grep -rc '\bunsafe\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+          if [ "$unsafe_count" -gt 0 ]; then
+            echo "::warning::$unsafe_count unsafe declaration(s) found"
+            echo "Count: **$unsafe_count** (review required)" >> "$GITHUB_STEP_SUMMARY"
+            grep -rn '\bunsafe\b' WasmNum/ --include="*.lean" 2>/dev/null | head -20 >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Count: **0**" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # --- native_decide usage ---
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "#### native_decide Usage" >> "$GITHUB_STEP_SUMMARY"
+          native_decide_count=$(grep -rc 'native_decide' WasmNum/ Proofs/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+          echo "Count: **$native_decide_count**" >> "$GITHUB_STEP_SUMMARY"
+
+  proof-metrics:
+    name: "Proof & Project Metrics"
+    needs: [build-proofs, build-tests]
+    runs-on: arc-runner-set-pw
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Collect file metrics
+        shell: bash
+        run: |
+          echo "### Project Metrics" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          # --- File counts ---
+          echo "#### File Distribution" >> "$GITHUB_STEP_SUMMARY"
+          def_files=$(find WasmNum/ -name "*.lean" -not -path "*/Proofs/*" 2>/dev/null | wc -l)
+          proof_files_inner=$(find WasmNum/Proofs/ -name "*.lean" 2>/dev/null | wc -l)
+          proof_files_outer=$(find Proofs/ -name "*.lean" 2>/dev/null | wc -l)
+          proof_files=$((proof_files_inner + proof_files_outer))
+          test_files=$(find WasmTest/ -name "*.lean" 2>/dev/null | wc -l)
+          total_files=$((def_files + proof_files + test_files))
+
+          echo "| Category | Files |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Definitions | $def_files |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Proofs | $proof_files |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tests | $test_files |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Total** | **$total_files** |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Collect LOC metrics
+        shell: bash
+        run: |
+          echo "#### Lines of Code" >> "$GITHUB_STEP_SUMMARY"
+          def_loc=$(find WasmNum/ -name "*.lean" -not -path "*/Proofs/*" -exec cat {} + 2>/dev/null | wc -l)
+          proof_loc=$(cat $(find WasmNum/Proofs/ Proofs/ -name "*.lean" 2>/dev/null) 2>/dev/null | wc -l)
+          test_loc=$(find WasmTest/ -name "*.lean" -exec cat {} + 2>/dev/null | wc -l)
+          total_loc=$((def_loc + proof_loc + test_loc))
+
+          echo "| Category | LOC |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|-----|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Definitions | $def_loc |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Proofs | $proof_loc |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tests | $test_loc |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Total** | **$total_loc** |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Collect construct metrics
+        shell: bash
+        run: |
+          echo "#### Lean Constructs" >> "$GITHUB_STEP_SUMMARY"
+          theorem_count=$(grep -rc '^\s*theorem\b\|^\s*lemma\b' WasmNum/ Proofs/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+          def_count=$(grep -rc '^\s*def\b\|^\s*noncomputable def\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+          structure_count=$(grep -rc '^\s*structure\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+          class_count=$(grep -rc '^\s*class\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+          instance_count=$(grep -rc '^\s*instance\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+          abbrev_count=$(grep -rc '^\s*abbrev\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+          inductive_count=$(grep -rc '^\s*inductive\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+
+          echo "| Construct | Count |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-----------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| theorem / lemma | $theorem_count |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| def | $def_count |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| structure | $structure_count |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| class | $class_count |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| instance | $instance_count |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| abbrev | $abbrev_count |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| inductive | $inductive_count |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build timing summary
+        shell: bash
+        run: |
+          echo "#### Build Timings" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Target | Duration |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|--------|----------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| WasmNum (definitions) | ${{ needs.build-definitions.outputs.build_duration }}s |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| WasmNumProofs (proofs) | ${{ needs.build-proofs.outputs.build_duration }}s |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| TestAll (tests) | ${{ needs.build-tests.outputs.build_duration }}s |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save metrics report
+        shell: bash
+        run: |
+          # Generate machine-readable metrics for tracking
+          cat > metrics.json << 'METRICS_EOF'
+          {
+            "commit": "${{ github.sha }}",
+            "ref": "${{ github.ref_name }}",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "build_durations": {
+              "definitions": "${{ needs.build-definitions.outputs.build_duration }}",
+              "proofs": "${{ needs.build-proofs.outputs.build_duration }}",
+              "tests": "${{ needs.build-tests.outputs.build_duration }}"
+            }
+          }
+          METRICS_EOF
+
+      - name: Upload metrics
+        uses: actions/upload-artifact@v4
+        with:
+          name: proof-metrics
+          path: metrics.json
+          retention-days: 90
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Stage 4: Pipeline Gate (mandatory — blocks merge)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  ci-status:
+    name: "CI Pipeline Status"
+    if: always()
+    needs:
+      - sorry-scan
+      - lint-sources
+      - secret-detection
+      - dependency-review
+      - build-definitions
+      - build-proofs
+      - build-tests
+      - axiom-audit
+      - proof-metrics
+    runs-on: arc-runner-set-pw
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Pipeline results summary
+        shell: bash
+        run: |
+          echo "### CI Pipeline Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Stage | Job | Result |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-----|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Validate | Sorry Scan | \`${{ needs.sorry-scan.result }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Validate | Source Lint | \`${{ needs.lint-sources.result }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Security | Secret Detection | \`${{ needs.secret-detection.result }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Security | Dependency Review | \`${{ needs.dependency-review.result }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Build | Definitions | \`${{ needs.build-definitions.result }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Build | Proofs | \`${{ needs.build-proofs.result }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Build | Tests | \`${{ needs.build-tests.result }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Analyze | Axiom Audit | \`${{ needs.axiom-audit.result }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Analyze | Proof Metrics | \`${{ needs.proof-metrics.result }}\` |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce quality gates
+        shell: bash
+        run: |
+          echo "=== Enforcing quality gates ==="
+          failed=0
+
+          # Critical gates — must pass
+          critical_jobs=(
+            "sorry-scan:${{ needs.sorry-scan.result }}"
+            "lint-sources:${{ needs.lint-sources.result }}"
+            "secret-detection:${{ needs.secret-detection.result }}"
+            "build-definitions:${{ needs.build-definitions.result }}"
+            "build-proofs:${{ needs.build-proofs.result }}"
+            "build-tests:${{ needs.build-tests.result }}"
+          )
+
+          for entry in "${critical_jobs[@]}"; do
+            job_name="${entry%%:*}"
+            result="${entry##*:}"
+            if [ "$result" != "success" ]; then
+              echo "::error::CRITICAL gate failed: $job_name ($result)"
+              failed=1
+            fi
+          done
+
+          # Advisory gates — warn but don't block
+          advisory_jobs=(
+            "dependency-review:${{ needs.dependency-review.result }}"
+            "axiom-audit:${{ needs.axiom-audit.result }}"
+            "proof-metrics:${{ needs.proof-metrics.result }}"
+          )
+
+          for entry in "${advisory_jobs[@]}"; do
+            job_name="${entry%%:*}"
+            result="${entry##*:}"
+            if [ "$result" != "success" ]; then
+              echo "::warning::Advisory gate: $job_name ($result)"
+            fi
+          done
+
+          if [ "$failed" -eq 1 ]; then
+            echo "::error::Pipeline FAILED — one or more critical quality gates did not pass"
+            exit 1
+          fi
+
+          echo "All critical quality gates passed"
