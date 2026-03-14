@@ -1,0 +1,203 @@
+# =============================================================================
+# Stage: build — Lean 4 Library Build
+# =============================================================================
+# Builds all Lean 4 targets: definitions (WasmNum), formal proofs
+# (WasmNumProofs), and tests (TestAll). Uses Lake with Mathlib cache for
+# incremental compilation.
+#
+# Build graph:
+#   build_definitions → build_proofs (depends on definitions)
+#                     → build_tests  (depends on definitions)
+# =============================================================================
+
+# --- Build WasmNum definitions ---
+build_definitions:
+  stage: build
+  tags:
+    - normal
+  timeout: 120m
+  interruptible: true
+  needs:
+    - job: setup_toolchain
+      artifacts: false
+    - job: lint_sources
+      artifacts: false
+  resource_group: lean-build
+  cache:
+    - key:
+        files:
+          - lean-toolchain
+          - lake-manifest.json
+      paths:
+        - .lake/packages/
+      policy: pull-push
+    - key: "lake-build-${CI_COMMIT_SHORT_SHA}"
+      paths:
+        - .lake/build/
+      policy: push
+  script:
+    - export PATH="$ELAN_HOME/bin:$PATH"
+
+    # Ensure Mathlib cache is available
+    - |
+      echo "=== Pre-build: Checking Mathlib cache ==="
+      lake exe cache get 2>/dev/null || echo "WARNING: Mathlib cache unavailable"
+
+    # Build definitions
+    - |
+      echo "=== Building WasmNum (definitions) ==="
+      start_time=$(date +%s)
+      lake build WasmNum 2>&1 | tee build-definitions.log
+      build_exit=${PIPESTATUS[0]}
+      end_time=$(date +%s)
+      duration=$((end_time - start_time))
+      echo ""
+      echo "Build duration: ${duration}s"
+      echo "Build exit code: $build_exit"
+
+    # Check for errors
+    - |
+      errors=$(grep -c 'error:' build-definitions.log || true)
+      warnings=$(grep -c 'warning:' build-definitions.log || true)
+      echo "Errors: $errors | Warnings: $warnings"
+
+      if [ "$errors" -gt 0 ]; then
+        echo "ERROR: Build produced $errors error(s)"
+        exit 1
+      fi
+  artifacts:
+    paths:
+      - build-definitions.log
+    expire_in: 14 days
+    when: always
+  rules:
+    - when: on_success
+
+# --- Build WasmNumProofs (formal proofs) ---
+build_proofs:
+  stage: build
+  tags:
+    - normal
+  timeout: 180m
+  interruptible: true
+  needs:
+    - job: build_definitions
+      artifacts: false
+  resource_group: lean-build
+  cache:
+    - key:
+        files:
+          - lean-toolchain
+          - lake-manifest.json
+      paths:
+        - .lake/packages/
+      policy: pull
+    - key: "lake-build-${CI_COMMIT_SHORT_SHA}"
+      paths:
+        - .lake/build/
+      policy: pull-push
+  script:
+    - export PATH="$ELAN_HOME/bin:$PATH"
+
+    # Fetch Mathlib cache if needed
+    - lake exe cache get 2>/dev/null || true
+
+    # Build proofs
+    - |
+      echo "=== Building WasmNumProofs (formal proofs) ==="
+      start_time=$(date +%s)
+      lake build WasmNumProofs 2>&1 | tee build-proofs.log
+      build_exit=${PIPESTATUS[0]}
+      end_time=$(date +%s)
+      duration=$((end_time - start_time))
+      echo ""
+      echo "Build duration: ${duration}s"
+      echo "Build exit code: $build_exit"
+
+    # CRITICAL: Verify no sorry in proof build output
+    - |
+      echo "=== Post-build sorry verification ==="
+      sorry_warnings=$(grep -i 'sorry' build-proofs.log || true)
+      if [ -n "$sorry_warnings" ]; then
+        echo "FATAL: Proof build output references sorry — proofs are incomplete"
+        echo "$sorry_warnings"
+        exit 1
+      fi
+      echo "No sorry detected in proof build output"
+
+    # Check for errors
+    - |
+      errors=$(grep -c 'error:' build-proofs.log || true)
+      warnings=$(grep -c 'warning:' build-proofs.log || true)
+      echo "Errors: $errors | Warnings: $warnings"
+
+      if [ "$errors" -gt 0 ]; then
+        echo "ERROR: Proof build produced $errors error(s)"
+        exit 1
+      fi
+  artifacts:
+    paths:
+      - build-proofs.log
+    expire_in: 14 days
+    when: always
+  rules:
+    - when: on_success
+
+# --- Build Tests ---
+build_tests:
+  stage: build
+  tags:
+    - normal
+  timeout: 120m
+  interruptible: true
+  needs:
+    - job: build_definitions
+      artifacts: false
+  resource_group: lean-build
+  cache:
+    - key:
+        files:
+          - lean-toolchain
+          - lake-manifest.json
+      paths:
+        - .lake/packages/
+      policy: pull
+    - key: "lake-build-${CI_COMMIT_SHORT_SHA}"
+      paths:
+        - .lake/build/
+      policy: pull-push
+  script:
+    - export PATH="$ELAN_HOME/bin:$PATH"
+
+    # Fetch Mathlib cache if needed
+    - lake exe cache get 2>/dev/null || true
+
+    # Build test suite
+    - |
+      echo "=== Building TestAll ==="
+      start_time=$(date +%s)
+      lake build TestAll 2>&1 | tee build-tests.log
+      build_exit=${PIPESTATUS[0]}
+      end_time=$(date +%s)
+      duration=$((end_time - start_time))
+      echo ""
+      echo "Build duration: ${duration}s"
+      echo "Build exit code: $build_exit"
+
+    # Check for errors
+    - |
+      errors=$(grep -c 'error:' build-tests.log || true)
+      warnings=$(grep -c 'warning:' build-tests.log || true)
+      echo "Errors: $errors | Warnings: $warnings"
+
+      if [ "$errors" -gt 0 ]; then
+        echo "ERROR: Test build produced $errors error(s)"
+        exit 1
+      fi
+  artifacts:
+    paths:
+      - build-tests.log
+    expire_in: 14 days
+    when: always
+  rules:
+    - when: on_success
