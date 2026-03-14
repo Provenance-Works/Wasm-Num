@@ -1,0 +1,252 @@
+# =============================================================================
+# Stage: analyze — Proof Metrics & Axiom Audit
+# =============================================================================
+# Post-build analysis: axiom usage audit, proof metrics collection,
+# build size reporting, and project health indicators.
+# =============================================================================
+
+# --- Axiom & Foundation Audit ---
+axiom_audit:
+  stage: analyze
+  tags:
+    - normal
+  timeout: 15m
+  interruptible: true
+  needs:
+    - job: build_proofs
+      artifacts: false
+  script:
+    - |
+      echo "╔══════════════════════════════════════╗"
+      echo "║     Axiom & Foundation Audit         ║"
+      echo "╚══════════════════════════════════════╝"
+      echo ""
+
+      # --- Custom axiom declarations ---
+      echo "=== Custom Axioms ==="
+      custom_axioms=$(grep -rn '^axiom ' WasmNum/ Proofs/ --include="*.lean" 2>/dev/null || true)
+      if [ -n "$custom_axioms" ]; then
+        count=$(echo "$custom_axioms" | wc -l)
+        echo "WARNING: $count custom axiom(s) found:"
+        echo "$custom_axioms"
+      else
+        echo "No custom axioms declared"
+      fi
+
+      echo ""
+
+      # --- noncomputable declarations ---
+      echo "=== Noncomputable Declarations ==="
+      noncomp=$(grep -rn 'noncomputable' WasmNum/ --include="*.lean" 2>/dev/null || true)
+      noncomp_count=$(echo "$noncomp" | grep -c '.' || true)
+      echo "Count: $noncomp_count"
+      if [ "$noncomp_count" -gt 0 ]; then
+        echo "$noncomp" | head -20
+      fi
+
+      echo ""
+
+      # --- Classical logic usage ---
+      echo "=== Classical Logic ==="
+      classical=$(grep -rn 'Classical\.' WasmNum/ --include="*.lean" 2>/dev/null || true)
+      classical_count=$(echo "$classical" | grep -c '.' || true)
+      echo "Classical.* references: $classical_count"
+
+      echo ""
+
+      # --- unsafe declarations ---
+      echo "=== Unsafe Declarations ==="
+      unsafe=$(grep -rn '\bunsafe\b' WasmNum/ --include="*.lean" 2>/dev/null || true)
+      unsafe_count=$(echo "$unsafe" | grep -c '.' || true)
+      echo "Count: $unsafe_count"
+      if [ "$unsafe_count" -gt 0 ]; then
+        echo "$unsafe"
+      fi
+
+      echo ""
+
+      # --- native_decide usage ---
+      echo "=== native_decide ==="
+      nd=$(grep -rn 'native_decide' WasmNum/ Proofs/ --include="*.lean" 2>/dev/null || true)
+      nd_count=$(echo "$nd" | grep -c '.' || true)
+      echo "Count: $nd_count"
+
+      echo ""
+
+      # --- sorry tally (informational) ---
+      echo "=== Sorry Tally (informational) ==="
+      sorry_count=$(grep -rc '\bsorry\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+      echo "Total sorry references in WasmNum/: $sorry_count"
+
+      echo ""
+      echo "=== Audit Complete ==="
+  artifacts:
+    reports:
+      dotenv: audit.env
+    when: always
+  rules:
+    - when: on_success
+
+# --- Proof & Project Metrics ---
+proof_metrics:
+  stage: analyze
+  tags:
+    - normal
+  timeout: 10m
+  interruptible: true
+  needs:
+    - job: build_proofs
+      artifacts: false
+    - job: build_tests
+      artifacts: false
+  script:
+    - |
+      echo "╔══════════════════════════════════════╗"
+      echo "║       Project Metrics Report         ║"
+      echo "╚══════════════════════════════════════╝"
+      echo ""
+
+      # --- File distribution ---
+      echo "=== File Distribution ==="
+      def_files=$(find WasmNum/ -name "*.lean" -not -path "*/Proofs/*" 2>/dev/null | wc -l)
+      proof_files_inner=$(find WasmNum/Proofs/ -name "*.lean" 2>/dev/null | wc -l)
+      proof_files_outer=$(find Proofs/ -name "*.lean" 2>/dev/null | wc -l)
+      proof_files=$((proof_files_inner + proof_files_outer))
+      test_files=$(find WasmTest/ -name "*.lean" 2>/dev/null | wc -l)
+      total_files=$((def_files + proof_files + test_files))
+
+      printf "%-20s %6d\n" "Definitions:" "$def_files"
+      printf "%-20s %6d\n" "Proofs:" "$proof_files"
+      printf "%-20s %6d\n" "Tests:" "$test_files"
+      printf "%-20s %6d\n" "TOTAL:" "$total_files"
+
+      echo ""
+
+      # --- Lines of code ---
+      echo "=== Lines of Code ==="
+      def_loc=$(find WasmNum/ -name "*.lean" -not -path "*/Proofs/*" -exec cat {} + 2>/dev/null | wc -l)
+      proof_loc=$(cat $(find WasmNum/Proofs/ Proofs/ -name "*.lean" 2>/dev/null) 2>/dev/null | wc -l)
+      test_loc=$(find WasmTest/ -name "*.lean" -exec cat {} + 2>/dev/null | wc -l)
+      total_loc=$((def_loc + proof_loc + test_loc))
+
+      printf "%-20s %8d\n" "Definitions:" "$def_loc"
+      printf "%-20s %8d\n" "Proofs:" "$proof_loc"
+      printf "%-20s %8d\n" "Tests:" "$test_loc"
+      printf "%-20s %8d\n" "TOTAL:" "$total_loc"
+
+      echo ""
+
+      # --- Lean construct counts ---
+      echo "=== Lean Constructs ==="
+      theorem_count=$(grep -rc '^\s*theorem\b\|^\s*lemma\b' WasmNum/ Proofs/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+      def_count=$(grep -rc '^\s*def\b\|^\s*noncomputable def\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+      structure_count=$(grep -rc '^\s*structure\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+      class_count=$(grep -rc '^\s*class\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+      instance_count=$(grep -rc '^\s*instance\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+      abbrev_count=$(grep -rc '^\s*abbrev\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+      inductive_count=$(grep -rc '^\s*inductive\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+
+      printf "%-20s %6d\n" "theorem/lemma:" "$theorem_count"
+      printf "%-20s %6d\n" "def:" "$def_count"
+      printf "%-20s %6d\n" "structure:" "$structure_count"
+      printf "%-20s %6d\n" "class:" "$class_count"
+      printf "%-20s %6d\n" "instance:" "$instance_count"
+      printf "%-20s %6d\n" "abbrev:" "$abbrev_count"
+      printf "%-20s %6d\n" "inductive:" "$inductive_count"
+
+      echo ""
+
+      # --- Module hierarchy depth ---
+      echo "=== Module Hierarchy ==="
+      max_depth=$(find WasmNum/ -name "*.lean" | awk -F/ '{print NF-1}' | sort -rn | head -1)
+      echo "Maximum nesting depth: $max_depth"
+      echo "Top-level modules:"
+      ls -1 WasmNum/*.lean 2>/dev/null || true
+      echo "Sub-modules:"
+      ls -1d WasmNum/*/ 2>/dev/null || true
+
+      echo ""
+
+      # --- Generate metrics JSON ---
+      echo "=== Metrics JSON ==="
+      cat > metrics.json << EOF
+      {
+        "commit": "$CI_COMMIT_SHORT_SHA",
+        "ref": "$CI_COMMIT_REF_NAME",
+        "pipeline": "$CI_PIPELINE_ID",
+        "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+        "files": {
+          "definitions": $def_files,
+          "proofs": $proof_files,
+          "tests": $test_files,
+          "total": $total_files
+        },
+        "loc": {
+          "definitions": $def_loc,
+          "proofs": $proof_loc,
+          "tests": $test_loc,
+          "total": $total_loc
+        },
+        "constructs": {
+          "theorems": $theorem_count,
+          "definitions": $def_count,
+          "structures": $structure_count,
+          "classes": $class_count,
+          "instances": $instance_count
+        }
+      }
+      EOF
+      cat metrics.json
+  artifacts:
+    paths:
+      - metrics.json
+    expire_in: 90 days
+    when: always
+  rules:
+    - when: on_success
+
+# --- Build size report ---
+build_size_report:
+  stage: analyze
+  tags:
+    - normal
+  timeout: 10m
+  interruptible: true
+  needs:
+    - job: build_proofs
+      artifacts: false
+  cache:
+    - key: "lake-build-${CI_COMMIT_SHORT_SHA}"
+      paths:
+        - .lake/build/
+      policy: pull
+  script:
+    - |
+      echo "╔══════════════════════════════════════╗"
+      echo "║       Build Size Report              ║"
+      echo "╚══════════════════════════════════════╝"
+      echo ""
+
+      echo "=== .lake/build directory ==="
+      if [ -d ".lake/build" ]; then
+        total_size=$(du -sh .lake/build 2>/dev/null | cut -f1)
+        echo "Total build size: $total_size"
+
+        echo ""
+        echo "=== Size by subdirectory ==="
+        du -sh .lake/build/*/ 2>/dev/null | sort -rh | head -20
+
+        echo ""
+        echo "=== Olean file count ==="
+        olean_count=$(find .lake/build -name "*.olean" 2>/dev/null | wc -l)
+        echo "Total .olean files: $olean_count"
+
+        echo ""
+        echo "=== Largest olean files ==="
+        find .lake/build -name "*.olean" -exec ls -lh {} + 2>/dev/null | sort -k5 -rh | head -10
+      else
+        echo "Build directory not available (cache miss)"
+      fi
+  rules:
+    - when: on_success
+  allow_failure: true
