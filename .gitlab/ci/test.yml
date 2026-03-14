@@ -111,7 +111,7 @@ full_rebuild_check:
       paths:
         - .lake/packages/
       policy: pull
-    - key: "lake-build-${CI_COMMIT_SHORT_SHA}"
+    - key: "lake-build-${CI_COMMIT_REF_SLUG}"
       paths:
         - .lake/build/
       policy: pull

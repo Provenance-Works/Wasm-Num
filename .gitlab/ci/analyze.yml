@@ -75,7 +75,7 @@ axiom_audit:
 
       # --- sorry tally (informational) ---
       echo "=== Sorry Tally (informational) ==="
-      sorry_count=$(grep -rc '\bsorry\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+      sorry_count=$(grep -rc '\bsorry\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}' || true)
       echo "Total sorry references in WasmNum/: $sorry_count"
 
       echo ""
@@ -141,13 +141,13 @@ proof_metrics:
 
       # --- Lean construct counts ---
       echo "=== Lean Constructs ==="
-      theorem_count=$(grep -rc '^\s*theorem\b\|^\s*lemma\b' WasmNum/ Proofs/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
-      def_count=$(grep -rc '^\s*def\b\|^\s*noncomputable def\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
-      structure_count=$(grep -rc '^\s*structure\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
-      class_count=$(grep -rc '^\s*class\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
-      instance_count=$(grep -rc '^\s*instance\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
-      abbrev_count=$(grep -rc '^\s*abbrev\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
-      inductive_count=$(grep -rc '^\s*inductive\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+      theorem_count=$(grep -rc '^\s*theorem\b\|^\s*lemma\b' WasmNum/ Proofs/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}' || true)
+      def_count=$(grep -rc '^\s*def\b\|^\s*noncomputable def\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}' || true)
+      structure_count=$(grep -rc '^\s*structure\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}' || true)
+      class_count=$(grep -rc '^\s*class\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}' || true)
+      instance_count=$(grep -rc '^\s*instance\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}' || true)
+      abbrev_count=$(grep -rc '^\s*abbrev\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}' || true)
+      inductive_count=$(grep -rc '^\s*inductive\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}' || true)
 
       printf "%-20s %6d\n" "theorem/lemma:" "$theorem_count"
       printf "%-20s %6d\n" "def:" "$def_count"
@@ -219,7 +219,7 @@ build_size_report:
     - job: build_proofs
       artifacts: false
   cache:
-    - key: "lake-build-${CI_COMMIT_SHORT_SHA}"
+    - key: "lake-build-${CI_COMMIT_REF_SLUG}"
       paths:
         - .lake/build/
       policy: pull
