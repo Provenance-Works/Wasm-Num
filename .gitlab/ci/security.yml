@@ -23,7 +23,7 @@ secret_detection:
 
       # AWS access keys
       echo "--- AWS access keys ---"
-      if grep -rn 'AKIA[0-9A-Z]\{16\}' --include="*.lean" --include="*.toml" --include="*.json" --include="*.yml" --include="*.yaml" . 2>/dev/null; then
+      if grep -rn '[A]KIA[0-9A-Z]\{16\}' --include="*.lean" --include="*.toml" --include="*.json" --include="*.yml" --include="*.yaml" . 2>/dev/null; then
         echo "ALERT: AWS access key pattern detected"
         found=1
       else
@@ -32,7 +32,7 @@ secret_detection:
 
       # Private keys
       echo "--- Private keys ---"
-      if grep -rn 'BEGIN.*PRIVATE KEY' --include="*.lean" --include="*.toml" --include="*.json" --include="*.yml" --include="*.yaml" --include="*.pem" . 2>/dev/null; then
+      if grep -rn '[B]EGIN.*PRIVATE KEY' --include="*.lean" --include="*.toml" --include="*.json" --include="*.yml" --include="*.yaml" --include="*.pem" . 2>/dev/null; then
         echo "ALERT: Private key detected"
         found=1
       else
@@ -41,7 +41,7 @@ secret_detection:
 
       # Platform tokens (GitHub, GitLab)
       echo "--- Platform tokens ---"
-      if grep -rn 'ghp_\|gho_\|github_pat_\|glpat-\|gcicd_' --include="*.lean" --include="*.toml" --include="*.json" --include="*.yml" --include="*.yaml" . 2>/dev/null; then
+      if grep -rn '[g]hp_\|gho_\|github_pat_\|glpat-\|gcicd_' --include="*.lean" --include="*.toml" --include="*.json" --include="*.yml" --include="*.yaml" . 2>/dev/null; then
         echo "ALERT: Platform token detected"
         found=1
       else
@@ -50,7 +50,7 @@ secret_detection:
 
       # Generic API keys
       echo "--- API keys ---"
-      if grep -rn 'api[_-]\?key\s*[:=]\s*["'"'"'][a-zA-Z0-9]\{20,\}' --include="*.toml" --include="*.json" --include="*.yml" --include="*.yaml" --include="*.env" . 2>/dev/null; then
+      if grep -rn '[a]pi[_-]\?key\s*[:=]\s*["'"'"'][a-zA-Z0-9]\{20,\}' --include="*.toml" --include="*.json" --include="*.yml" --include="*.yaml" --include="*.env" . 2>/dev/null; then
         echo "ALERT: Possible API key in configuration"
         found=1
       else
@@ -59,7 +59,7 @@ secret_detection:
 
       # Hardcoded passwords
       echo "--- Hardcoded passwords ---"
-      if grep -rn 'password\s*=\s*"[^"]\{8,\}"' --include="*.toml" --include="*.json" --include="*.yml" --include="*.yaml" --include="*.env" . 2>/dev/null; then
+      if grep -rn '[p]assword\s*=\s*"[^"]\{8,\}"' --include="*.toml" --include="*.json" --include="*.yml" --include="*.yaml" --include="*.env" . 2>/dev/null; then
         echo "ALERT: Possible hardcoded password"
         found=1
       else

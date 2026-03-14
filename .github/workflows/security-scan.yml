@@ -50,25 +50,25 @@ jobs:
 
           echo "=== Scanning working tree ==="
           # AWS access keys
-          if git grep -n 'AKIA[0-9A-Z]\{16\}' -- '*.lean' '*.toml' '*.json' '*.yml' '*.yaml' 2>/dev/null; then
+          if git grep -n '[A]KIA[0-9A-Z]\{16\}' -- '*.lean' '*.toml' '*.json' '*.yml' '*.yaml' 2>/dev/null; then
             echo "::error::AWS access key pattern detected in working tree"
             found=1
           fi
 
           # Private keys
-          if git grep -n 'BEGIN.*PRIVATE KEY' -- '*.lean' '*.toml' '*.json' '*.yml' '*.yaml' '*.pem' 2>/dev/null; then
+          if git grep -n '[B]EGIN.*PRIVATE KEY' -- '*.lean' '*.toml' '*.json' '*.yml' '*.yaml' '*.pem' 2>/dev/null; then
             echo "::error::Private key detected in working tree"
             found=1
           fi
 
           # GitHub / GitLab tokens
-          if git grep -n 'ghp_\|gho_\|github_pat_\|glpat-' -- '*.lean' '*.toml' '*.json' '*.yml' '*.yaml' 2>/dev/null; then
+          if git grep -n '[g]hp_\|gho_\|github_pat_\|glpat-' -- '*.lean' '*.toml' '*.json' '*.yml' '*.yaml' 2>/dev/null; then
             echo "::error::Platform token detected in working tree"
             found=1
           fi
 
           # Generic API keys / secrets in config
-          if git grep -n 'api[_-]\?key\s*[:=]\s*["'"'"'][a-zA-Z0-9]\{20,\}' -- '*.toml' '*.json' '*.yml' '*.yaml' '*.env' 2>/dev/null; then
+          if git grep -n '[a]pi[_-]\?key\s*[:=]\s*["'"'"'][a-zA-Z0-9]\{20,\}' -- '*.toml' '*.json' '*.yml' '*.yaml' '*.env' 2>/dev/null; then
             echo "::error::Possible API key in configuration"
             found=1
           fi
@@ -76,7 +76,7 @@ jobs:
           echo "=== Scanning git history (last 100 commits) ==="
           # Check recent commit diffs for secrets
           git log -100 --diff-filter=A -p -- '*.lean' '*.toml' '*.json' '*.yml' '*.yaml' | \
-            grep -n 'AKIA\|BEGIN.*PRIVATE KEY\|ghp_\|gho_\|glpat-\|password\s*=' || true
+            grep -n '[A]KIA\|[B]EGIN.*PRIVATE KEY\|[g]hp_\|gho_\|glpat-\|[p]assword\s*=' || true
 
           if [ "$found" -eq 1 ]; then
             echo "**FAILED** — Secrets detected" >> "$GITHUB_STEP_SUMMARY"

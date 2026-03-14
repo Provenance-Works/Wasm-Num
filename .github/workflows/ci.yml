@@ -272,25 +272,25 @@ jobs:
           found=0
 
           # AWS keys
-          if grep -rn 'AKIA[0-9A-Z]\{16\}' --include="*.lean" --include="*.toml" --include="*.json" . 2>/dev/null; then
+          if grep -rn '[A]KIA[0-9A-Z]\{16\}' --include="*.lean" --include="*.toml" --include="*.json" . 2>/dev/null; then
             echo "::error::Possible AWS access key detected"
             found=1
           fi
 
           # Private keys
-          if grep -rn 'BEGIN.*PRIVATE KEY' --include="*.lean" --include="*.toml" --include="*.json" . 2>/dev/null; then
+          if grep -rn '[B]EGIN.*PRIVATE KEY' --include="*.lean" --include="*.toml" --include="*.json" . 2>/dev/null; then
             echo "::error::Possible private key detected"
             found=1
           fi
 
           # Generic high-entropy secrets (API keys, tokens)
-          if grep -rn 'password\s*=\s*"[^"]\{8,\}"' --include="*.lean" --include="*.toml" --include="*.json" . 2>/dev/null; then
+          if grep -rn '[p]assword\s*=\s*"[^"]\{8,\}"' --include="*.lean" --include="*.toml" --include="*.json" . 2>/dev/null; then
             echo "::error::Possible hardcoded password detected"
             found=1
           fi
 
           # GitHub tokens
-          if grep -rn 'ghp_[a-zA-Z0-9]\{36\}\|gho_[a-zA-Z0-9]\{36\}\|github_pat_' --include="*.lean" --include="*.toml" --include="*.json" . 2>/dev/null; then
+          if grep -rn '[g]hp_[a-zA-Z0-9]\{36\}\|gho_[a-zA-Z0-9]\{36\}\|github_pat_' --include="*.lean" --include="*.toml" --include="*.json" . 2>/dev/null; then
             echo "::error::Possible GitHub token detected"
             found=1
           fi
