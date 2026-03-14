@@ -1,0 +1,326 @@
+# =============================================================================
+# Release Pipeline — Lean 4 Formal Verification (wasm-num)
+# =============================================================================
+# Triggered on version tags (v*). Performs a full verification build, generates
+# release notes from conventional commits, and creates a GitHub Release with
+# build artifacts and proof metrics.
+# =============================================================================
+
+name: "Release — Create Verified Release"
+run-name: "Release ${{ github.ref_name }}"
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g., v0.2.0)"
+        required: true
+        type: string
+      dry_run:
+        description: "Dry run (skip GitHub Release creation)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_TAG: ${{ github.ref_name || inputs.tag }}
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # Validate release tag format
+  # ─────────────────────────────────────────────────────────────
+  validate-tag:
+    name: "Validate Release Tag"
+    runs-on: arc-runner-set-pw
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.parse.outputs.version }}
+      prerelease: ${{ steps.parse.outputs.prerelease }}
+    steps:
+      - name: Parse version tag
+        id: parse
+        shell: bash
+        run: |
+          TAG="${{ env.RELEASE_TAG }}"
+          echo "Processing tag: $TAG"
+
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "::error::Invalid tag format: $TAG (expected: vMAJOR.MINOR.PATCH[-prerelease])"
+            exit 1
+          fi
+
+          VERSION="${TAG#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          if [[ "$TAG" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "### Release: $TAG" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version: $VERSION" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Pre-release: $([[ "$TAG" == *-* ]] && echo 'yes' || echo 'no')" >> "$GITHUB_STEP_SUMMARY"
+
+  # ─────────────────────────────────────────────────────────────
+  # Full verification build
+  # ─────────────────────────────────────────────────────────────
+  verify-build:
+    name: "Full Verification Build"
+    needs: [validate-tag]
+    runs-on: arc-runner-set-pw
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    outputs:
+      build_success: ${{ steps.verify.outputs.success }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Lean toolchain + Mathlib cache
+        uses: leanprover/lean-action@v1
+        with:
+          use-mathlib-cache: true
+          build: false
+
+      - name: Build all targets
+        shell: bash
+        run: |
+          echo "=== Full release verification build ==="
+          start_time=$(date +%s)
+
+          echo "--- Building WasmNum ---"
+          lake build WasmNum 2>&1 | tee build-release.log
+
+          echo "--- Building WasmNumProofs ---"
+          lake build WasmNumProofs 2>&1 | tee -a build-release.log
+
+          echo "--- Building TestAll ---"
+          lake build TestAll 2>&1 | tee -a build-release.log
+
+          end_time=$(date +%s)
+          echo "Total build time: $((end_time - start_time))s"
+
+      - name: Verify build integrity
+        id: verify
+        shell: bash
+        run: |
+          echo "=== Post-build verification ==="
+
+          # Check for sorry in build output
+          if grep -qi 'sorry' build-release.log; then
+            echo "::error::Build output contains sorry references — release blocked"
+            echo "success=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          # Check for errors
+          if grep -q 'error:' build-release.log; then
+            echo "::error::Build produced errors — release blocked"
+            echo "success=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          echo "success=true" >> "$GITHUB_OUTPUT"
+          echo "### Release Build: Verified" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generate release manifest
+        shell: bash
+        run: |
+          cat > release-manifest.txt << EOF
+          wasm-num Release Manifest
+          ========================
+          Version:    ${{ env.RELEASE_TAG }}
+          Commit:     ${{ github.sha }}
+          Toolchain:  $(cat lean-toolchain)
+          Build Date: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          Targets Built:
+            - WasmNum (definitions)
+            - WasmNumProofs (formal proofs)
+            - TestAll (test suite)
+
+          Verification:
+            - Sorry check: PASSED
+            - Error check: PASSED
+            - All proofs type-checked successfully
+          EOF
+
+          # File counts
+          echo "" >> release-manifest.txt
+          echo "Project Statistics:" >> release-manifest.txt
+          echo "  Definition files: $(find WasmNum/ -name '*.lean' -not -path '*/Proofs/*' | wc -l)" >> release-manifest.txt
+          echo "  Proof files:      $(find WasmNum/Proofs/ Proofs/ -name '*.lean' 2>/dev/null | wc -l)" >> release-manifest.txt
+          echo "  Test files:       $(find WasmTest/ -name '*.lean' | wc -l)" >> release-manifest.txt
+          echo "  Total LOC:        $(find . -name '*.lean' -not -path './.lake/*' -exec cat {} + | wc -l)" >> release-manifest.txt
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: |
+            release-manifest.txt
+            build-release.log
+          retention-days: 90
+
+  # ─────────────────────────────────────────────────────────────
+  # Generate changelog from conventional commits
+  # ─────────────────────────────────────────────────────────────
+  changelog:
+    name: "Generate Changelog"
+    needs: [validate-tag]
+    runs-on: arc-runner-set-pw
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      changelog_path: ${{ steps.generate.outputs.path }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Generate changelog
+        id: generate
+        shell: bash
+        run: |
+          echo "=== Generating changelog ==="
+
+          # Find previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          if [ -n "$PREV_TAG" ]; then
+            echo "Previous tag: $PREV_TAG"
+            RANGE="${PREV_TAG}..HEAD"
+          else
+            echo "No previous tag found — generating full changelog"
+            RANGE="HEAD"
+          fi
+
+          cat > RELEASE_CHANGELOG.md << 'HEADER'
+          ## What's Changed
+          HEADER
+
+          # Categorize commits by conventional commit prefix
+          echo "" >> RELEASE_CHANGELOG.md
+
+          # Features
+          feats=$(git log $RANGE --pretty=format:"- %s (%h)" --grep="^feat" 2>/dev/null || true)
+          if [ -n "$feats" ]; then
+            echo "### Features" >> RELEASE_CHANGELOG.md
+            echo "$feats" >> RELEASE_CHANGELOG.md
+            echo "" >> RELEASE_CHANGELOG.md
+          fi
+
+          # Fixes
+          fixes=$(git log $RANGE --pretty=format:"- %s (%h)" --grep="^fix" 2>/dev/null || true)
+          if [ -n "$fixes" ]; then
+            echo "### Bug Fixes" >> RELEASE_CHANGELOG.md
+            echo "$fixes" >> RELEASE_CHANGELOG.md
+            echo "" >> RELEASE_CHANGELOG.md
+          fi
+
+          # Proofs
+          proofs=$(git log $RANGE --pretty=format:"- %s (%h)" --grep="^proof" 2>/dev/null || true)
+          if [ -n "$proofs" ]; then
+            echo "### Proofs" >> RELEASE_CHANGELOG.md
+            echo "$proofs" >> RELEASE_CHANGELOG.md
+            echo "" >> RELEASE_CHANGELOG.md
+          fi
+
+          # CI/CD
+          ci_changes=$(git log $RANGE --pretty=format:"- %s (%h)" --grep="^ci" 2>/dev/null || true)
+          if [ -n "$ci_changes" ]; then
+            echo "### CI/CD" >> RELEASE_CHANGELOG.md
+            echo "$ci_changes" >> RELEASE_CHANGELOG.md
+            echo "" >> RELEASE_CHANGELOG.md
+          fi
+
+          # Documentation
+          docs=$(git log $RANGE --pretty=format:"- %s (%h)" --grep="^docs" 2>/dev/null || true)
+          if [ -n "$docs" ]; then
+            echo "### Documentation" >> RELEASE_CHANGELOG.md
+            echo "$docs" >> RELEASE_CHANGELOG.md
+            echo "" >> RELEASE_CHANGELOG.md
+          fi
+
+          # Other commits
+          echo "### All Commits" >> RELEASE_CHANGELOG.md
+          git log $RANGE --pretty=format:"- %s (%h) — %an" 2>/dev/null >> RELEASE_CHANGELOG.md || true
+          echo "" >> RELEASE_CHANGELOG.md
+
+          # Toolchain info
+          echo "### Build Environment" >> RELEASE_CHANGELOG.md
+          echo "- Lean toolchain: \`$(cat lean-toolchain)\`" >> RELEASE_CHANGELOG.md
+          echo "- Mathlib revision: \`$(python3 -c "import json; d=json.load(open('lake-manifest.json')); print([p['rev'][:12] for p in d['packages'] if p['name']=='mathlib'][0])" 2>/dev/null || echo 'unknown')\`" >> RELEASE_CHANGELOG.md
+
+          echo "path=RELEASE_CHANGELOG.md" >> "$GITHUB_OUTPUT"
+
+      - name: Upload changelog
+        uses: actions/upload-artifact@v4
+        with:
+          name: changelog
+          path: RELEASE_CHANGELOG.md
+          retention-days: 90
+
+  # ─────────────────────────────────────────────────────────────
+  # Create GitHub Release
+  # ─────────────────────────────────────────────────────────────
+  create-release:
+    name: "Create GitHub Release"
+    needs: [validate-tag, verify-build, changelog]
+    if: ${{ inputs.dry_run != true }}
+    runs-on: arc-runner-set-pw
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Download changelog
+        uses: actions/download-artifact@v4
+        with:
+          name: changelog
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          PRERELEASE_FLAG=""
+          if [ "${{ needs.validate-tag.outputs.prerelease }}" = "true" ]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+
+          gh release create "${{ env.RELEASE_TAG }}" \
+            --title "wasm-num ${{ env.RELEASE_TAG }}" \
+            --notes-file RELEASE_CHANGELOG.md \
+            $PRERELEASE_FLAG \
+            release-manifest.txt \
+            build-release.log
+
+          echo "### Release Created" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Tag: ${{ env.RELEASE_TAG }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Pre-release: ${{ needs.validate-tag.outputs.prerelease }}" >> "$GITHUB_STEP_SUMMARY"
