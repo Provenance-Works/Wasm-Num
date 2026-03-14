@@ -667,29 +667,29 @@ jobs:
 
           # --- noncomputable usage ---
           echo "#### Noncomputable Declarations" >> "$GITHUB_STEP_SUMMARY"
-          noncomp_count=$(grep -rc 'noncomputable' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
-          echo "Count: **$noncomp_count**" >> "$GITHUB_STEP_SUMMARY"
+          noncomp_count=$(grep -rc 'noncomputable' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}' || true)
+          echo "Count: **${noncomp_count:-0}**" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
           # --- Classical logic usage ---
           echo "#### Classical Logic Usage" >> "$GITHUB_STEP_SUMMARY"
-          classical_count=$(grep -rc 'Classical\.' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
-          echo "Count: **$classical_count**" >> "$GITHUB_STEP_SUMMARY"
+          classical_count=$(grep -rc 'Classical\.' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}' || true)
+          echo "Count: **${classical_count:-0}**" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
           # --- Decidability instances ---
           echo "#### Decidability" >> "$GITHUB_STEP_SUMMARY"
-          decidable_count=$(grep -rc 'Decidable\|DecidableEq\|decEq' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
-          echo "Decidable references: **$decidable_count**" >> "$GITHUB_STEP_SUMMARY"
+          decidable_count=$(grep -rc 'Decidable\|DecidableEq\|decEq' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}' || true)
+          echo "Decidable references: **${decidable_count:-0}**" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
           # --- unsafe usage ---
           echo "#### Unsafe Usage" >> "$GITHUB_STEP_SUMMARY"
-          unsafe_count=$(grep -rc '\bunsafe\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
-          if [ "$unsafe_count" -gt 0 ]; then
-            echo "::warning::$unsafe_count unsafe declaration(s) found"
-            echo "Count: **$unsafe_count** (review required)" >> "$GITHUB_STEP_SUMMARY"
-            grep -rn '\bunsafe\b' WasmNum/ --include="*.lean" 2>/dev/null | head -20 >> "$GITHUB_STEP_SUMMARY"
+          unsafe_count=$(grep -rc '\bunsafe\b' WasmNum/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}' || true)
+          if [ "${unsafe_count:-0}" -gt 0 ]; then
+            echo "::warning::${unsafe_count} unsafe declaration(s) found"
+            echo "Count: **${unsafe_count}** (review required)" >> "$GITHUB_STEP_SUMMARY"
+            grep -rn '\bunsafe\b' WasmNum/ --include="*.lean" 2>/dev/null | head -20 >> "$GITHUB_STEP_SUMMARY" || true
           else
             echo "Count: **0**" >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -697,8 +697,8 @@ jobs:
           # --- native_decide usage ---
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "#### native_decide Usage" >> "$GITHUB_STEP_SUMMARY"
-          native_decide_count=$(grep -rc 'native_decide' WasmNum/ Proofs/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
-          echo "Count: **$native_decide_count**" >> "$GITHUB_STEP_SUMMARY"
+          native_decide_count=$(grep -rc 'native_decide' WasmNum/ Proofs/ --include="*.lean" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}' || true)
+          echo "Count: **${native_decide_count:-0}**" >> "$GITHUB_STEP_SUMMARY"
 
   proof-metrics:
     name: "Proof & Project Metrics"

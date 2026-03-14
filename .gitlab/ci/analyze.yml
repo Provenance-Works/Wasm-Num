@@ -80,6 +80,9 @@ axiom_audit:
 
       echo ""
       echo "=== Audit Complete ==="
+
+      # Create empty dotenv file if it doesn't exist so artifacts upload doesn't fail
+      touch audit.env
   artifacts:
     reports:
       dotenv: audit.env
