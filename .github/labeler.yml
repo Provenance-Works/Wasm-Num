@@ -1,0 +1,47 @@
+# =============================================================================
+# PR Labeler — wasm-num
+# =============================================================================
+# Automatically labels PRs based on changed file paths.
+# Used by the labeler GitHub Action.
+# =============================================================================
+
+foundation:
+  - changed-files:
+      - any-glob-to-any-file: "WasmNum/Foundation/**"
+
+numerics:
+  - changed-files:
+      - any-glob-to-any-file: "WasmNum/Numerics/**"
+
+simd:
+  - changed-files:
+      - any-glob-to-any-file: "WasmNum/SIMD/**"
+
+memory:
+  - changed-files:
+      - any-glob-to-any-file: "WasmNum/Memory/**"
+
+integration:
+  - changed-files:
+      - any-glob-to-any-file: "WasmNum/Integration/**"
+
+proofs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "WasmNum/Proofs/**"
+          - "Proofs/**"
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file: "WasmTest/**"
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "docs/**"
+          - "*.md"
+          - "!CHANGELOG.md"
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file: ".github/**"
