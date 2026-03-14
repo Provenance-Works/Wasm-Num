@@ -18,8 +18,6 @@ build_definitions:
   timeout: 120m
   interruptible: true
   needs:
-    - job: setup_toolchain
-      artifacts: false
     - job: lint_sources
       artifacts: false
   resource_group: lean-build
