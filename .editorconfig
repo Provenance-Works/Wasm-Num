@@ -1,0 +1,50 @@
+# =============================================================================
+# EditorConfig — wasm-num
+# =============================================================================
+# Consistent coding style across all editors.
+# https://editorconfig.org
+# =============================================================================
+
+root = true
+
+# Default for all files
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# Lean 4 source files
+[*.lean]
+indent_size = 2
+
+# TOML configuration (lakefile.toml)
+[*.toml]
+indent_size = 2
+
+# YAML (CI workflows, dependabot, issue templates)
+[*.{yml,yaml}]
+indent_size = 2
+
+# JSON (lake-manifest.json)
+[*.json]
+indent_size = 2
+
+# Markdown
+[*.md]
+trim_trailing_whitespace = false
+
+# Makefile (tabs required)
+[Makefile]
+indent_style = tab
+indent_size = 4
+
+# Shell scripts
+[*.sh]
+indent_size = 4
+
+# Git config files
+[.git*]
+indent_size = 4
