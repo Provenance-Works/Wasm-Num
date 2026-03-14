@@ -98,8 +98,8 @@ wasm-num の完全な API ドキュメント。アーキテクチャレイヤー
 
 | モジュール | インポートパス | ドキュメント |
 |-----------|-------------|------------|
-| DeterministicWasmProfile | `WasmNum.Integration.Profile` | [integration.md](integration.md) |
-| Runtime | `WasmNum.Integration.Runtime` | [integration.md](integration.md#ランタイムラッパー) |
+| Profile | `WasmNum.Integration.Profile` | [integration.md](integration.md#deterministicwasmprofile) |
+| Runtime | `WasmNum.Integration.Runtime` | [integration.md](integration.md#runtime-wrappers) |
 
 ## 関連ドキュメント
 
